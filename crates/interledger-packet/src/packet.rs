@@ -94,6 +94,27 @@ impl From<Reject> for Packet {
 }
 
 #[derive(PartialEq, Clone)]
+/// The `Prepare` type packet data.
+///
+/// The [packet structure](https://github.com/interledger/rfcs/blob/master/asn1/InterledgerProtocol.asn) is:
+///
+/// | size(bytes) | 1 | var | 8 | 17 | 32 | var | var |
+/// |---|---|---|---|---|---|---|---|
+/// | content | packet type | length of `data` | amount | expires at | execution condition | destination Address | `data` |
+/// | type | Uint8 | [Length determinant](https://github.com/interledger/rfcs/blob/master/0030-notes-on-oer-encoding/0030-notes-on-oer-encoding.md#length-determinant) | Uint64 | [PrintableString(17)](https://github.com/interledger/rfcs/blob/master/asn1/InterledgerTypes.asn#L49) | Uint256 | [Var Octet String](https://github.com/interledger/rfcs/blob/master/asn1/InterledgerTypes.asn#L18) | Var Octet String |
+///
+/// The bytes starts with `packet type` and ends with `data` (left to right).
+/// To be exact, a Var Octet String starts with a length determinant but it is omitted in the table.
+/// Please take a look at [IL-RFC 30](https://github.com/interledger/rfcs/blob/master/0030-notes-on-oer-encoding/0030-notes-on-oer-encoding.md#variable-length-octet-string) and [MutBufOerExt::put_var_octet_string](https://github.com/emschwartz/interledger-rs/blob/master/crates/interledger-packet/src/oer.rs#L121).
+///
+/// `content_offset` means where `amount` starts.
+/// In other words, `content_offset` means `packet type` + `length of data`.
+/// When we manipulate non-static-sized fields of the packet, we have to update the length determinant because it can differ after the manipulation.
+/// The non-static-sized fields are:
+/// - `destination Address`
+/// - `data`
+///
+/// `data_offset` means where `data` starts.
 pub struct Prepare {
     buffer: BytesMut,
     content_offset: usize,
@@ -188,10 +209,80 @@ impl Prepare {
     }
 
     #[inline]
+    pub fn set_destination(&mut self, destination: &[u8]) {
+        // copy some items from buffer, not to be cleared
+        let execution_condition = self.execution_condition();
+        let mut execution_condition_copy = Vec::with_capacity(execution_condition.len());
+        execution_condition_copy.extend_from_slice(execution_condition);
+        let data = self.data();
+        let mut data_copy = Vec::with_capacity(data.len());
+        data_copy.extend_from_slice(data);
+        let expires_at_begin = self.content_offset + AMOUNT_LEN;
+        let expires_at_end = expires_at_begin + EXPIRY_LEN;
+        let mut expires_at_copy = [0u8; EXPIRY_LEN];
+        expires_at_copy.clone_from_slice(&self.buffer[expires_at_begin..expires_at_end]);
+
+        // calculate size of each item
+        const STATIC_LEN: usize = AMOUNT_LEN + EXPIRY_LEN + CONDITION_LEN;
+        let destination_size = oer::predict_var_octet_string(destination.len());
+        let data_size = oer::predict_var_octet_string(data_copy.len());
+        let content_len = STATIC_LEN + destination_size + data_size;
+        let buf_size = 1 + oer::predict_var_octet_string(content_len);
+
+        // put into the buffer
+        self.buffer.resize(buf_size, 0);
+        self.buffer.clear();
+        self.buffer.put_u8(PacketType::Prepare as u8);
+        self.buffer.put_var_octet_string_length(content_len);
+        self.content_offset = self.buffer.len();
+        self.buffer.put_u64_be(self.amount);
+        self.buffer.put_slice(&expires_at_copy);
+        self.buffer.put_slice(&execution_condition_copy);
+        self.buffer.put_var_octet_string(destination);
+        self.data_offset = self.buffer.len();
+        self.buffer.put_var_octet_string(data_copy);
+    }
+
+    #[inline]
     pub fn data(&self) -> &[u8] {
         (&self.buffer[self.data_offset..])
             .peek_var_octet_string()
             .unwrap()
+    }
+
+    #[inline]
+    pub fn set_data(&mut self, data: &[u8]) {
+        // copy some items from buffer, not to be cleared
+        let execution_condition = self.execution_condition();
+        let mut execution_condition_copy = Vec::with_capacity(execution_condition.len());
+        execution_condition_copy.extend_from_slice(execution_condition);
+        let destination = self.destination();
+        let mut destination_copy = Vec::with_capacity(destination.len());
+        destination_copy.extend_from_slice(destination);
+        let expires_at_begin = self.content_offset + AMOUNT_LEN;
+        let expires_at_end = expires_at_begin + EXPIRY_LEN;
+        let mut expires_at_copy = [0u8; EXPIRY_LEN];
+        expires_at_copy.clone_from_slice(&self.buffer[expires_at_begin..expires_at_end]);
+
+        // calculate size of each item
+        const STATIC_LEN: usize = AMOUNT_LEN + EXPIRY_LEN + CONDITION_LEN;
+        let destination_size = oer::predict_var_octet_string(destination_copy.len());
+        let data_size = oer::predict_var_octet_string(data.len());
+        let content_len = STATIC_LEN + destination_size + data_size;
+        let buf_size = 1 + oer::predict_var_octet_string(content_len);
+
+        // put into the buffer
+        self.buffer.resize(buf_size, 0);
+        self.buffer.clear();
+        self.buffer.put_u8(PacketType::Prepare as u8);
+        self.buffer.put_var_octet_string_length(content_len);
+        self.content_offset = self.buffer.len();
+        self.buffer.put_u64_be(self.amount);
+        self.buffer.put_slice(&expires_at_copy);
+        self.buffer.put_slice(&execution_condition_copy);
+        self.buffer.put_var_octet_string(destination_copy);
+        self.data_offset = self.buffer.len();
+        self.buffer.put_var_octet_string(data);
     }
 
     #[inline]
@@ -575,7 +666,7 @@ mod test_packet {
 #[cfg(test)]
 mod test_prepare {
     use super::*;
-    use crate::fixtures::{self, PREPARE, PREPARE_BUILDER, PREPARE_BYTES};
+    use crate::fixtures::{self, LONG_DESTINATION, PREPARE, PREPARE_BUILDER, PREPARE_BYTES};
 
     #[test]
     fn test_try_from() {
@@ -656,8 +747,77 @@ mod test_prepare {
     }
 
     #[test]
+    fn test_set_destination() {
+        let mut original_prepare = PREPARE_BUILDER.clone();
+        original_prepare.data = &[1]; // to make the entire data short
+        let original_prepare = original_prepare.build();
+        let mut test_prepare = PREPARE_BUILDER.clone();
+        test_prepare.data = &[1]; // to make the entire data short
+        let mut test_prepare = test_prepare.build();
+
+        // just ensures that length determinant differs
+        let mut long_destination = Vec::<u8>::with_capacity(1023);
+        long_destination.extend_from_slice(&LONG_DESTINATION);
+        test_prepare.set_destination(&long_destination);
+
+        let mut reader = original_prepare.buffer.as_ref();
+        reader.skip(1).ok();
+        let original_content_length = reader.read_var_octet_string_length().unwrap();
+        assert!(original_content_length < 128);
+
+        let mut reader = test_prepare.buffer.as_ref();
+        reader.skip(1).ok();
+        let test_content_length = reader.read_var_octet_string_length().unwrap();
+        assert!(127 < test_content_length);
+
+        // ensures that only destination is updated
+        assert_ne!(original_prepare.content_offset, test_prepare.content_offset);
+        assert_ne!(original_prepare.data_offset, test_prepare.data_offset);
+        assert_eq!(original_prepare.amount(), test_prepare.amount());
+        assert_eq!(original_prepare.expires_at(), test_prepare.expires_at());
+        assert_eq!(
+            original_prepare.execution_condition(),
+            test_prepare.execution_condition()
+        );
+        assert_ne!(original_prepare.destination(), test_prepare.destination());
+        assert_eq!(test_prepare.destination(), long_destination.as_slice());
+        assert_eq!(original_prepare.data(), test_prepare.data());
+    }
+
+    #[test]
     fn test_data() {
         assert_eq!(PREPARE.data(), fixtures::DATA);
+    }
+
+    #[test]
+    fn test_set_data() {
+        let original_prepare = PREPARE_BUILDER.build();
+        let mut test_prepare = PREPARE_BUILDER.build();
+        test_prepare.set_data(&[1]);
+
+        // ensures that the length determinant size differs
+        let mut reader = original_prepare.buffer.as_ref();
+        reader.skip(1).ok();
+        let original_content_length = reader.read_var_octet_string_length().unwrap();
+        assert!(127 < original_content_length);
+
+        let mut reader = test_prepare.buffer.as_ref();
+        reader.skip(1).ok();
+        let test_content_length = reader.read_var_octet_string_length().unwrap();
+        assert!(test_content_length < 127);
+
+        // ensures that only destination is updated
+        assert_ne!(original_prepare.content_offset, test_prepare.content_offset);
+        assert_ne!(original_prepare.data_offset, test_prepare.data_offset);
+        assert_eq!(original_prepare.amount(), test_prepare.amount());
+        assert_eq!(original_prepare.expires_at(), test_prepare.expires_at());
+        assert_eq!(
+            original_prepare.execution_condition(),
+            test_prepare.execution_condition()
+        );
+        assert_eq!(original_prepare.destination(), test_prepare.destination());
+        assert_ne!(original_prepare.data(), test_prepare.data());
+        assert_eq!(test_prepare.data(), &[1]);
     }
 }
 
