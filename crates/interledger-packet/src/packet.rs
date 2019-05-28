@@ -1,10 +1,10 @@
 use hex;
+use std::borrow::Cow;
 use std::fmt;
 use std::io::prelude::*;
 use std::io::Cursor;
 use std::str;
 use std::time::SystemTime;
-use std::borrow::Cow;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
@@ -126,11 +126,11 @@ pub struct Prepare {
 
 /// The struct when updating Prepare with multiple parameters efficiently
 pub struct PrepareUpdateParams<'a> {
-    amount: Option<u64>,
-    expires_at: Option<SystemTime>,
-    execution_condition: Option<&'a [u8; 32]>,
-    destination: Option<&'a [u8]>,
-    data: Option<&'a [u8]>,
+    pub amount: Option<u64>,
+    pub expires_at: Option<SystemTime>,
+    pub execution_condition: Option<&'a [u8; 32]>,
+    pub destination: Option<&'a [u8]>,
+    pub data: Option<&'a [u8]>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -220,7 +220,7 @@ impl Prepare {
 
     #[inline]
     pub fn set_destination(&mut self, destination: &[u8]) {
-        self.set_multiple(PrepareUpdateParams{
+        self.set_multiple(PrepareUpdateParams {
             amount: None,
             expires_at: None,
             execution_condition: None,
@@ -238,7 +238,7 @@ impl Prepare {
 
     #[inline]
     pub fn set_data(&mut self, data: &[u8]) {
-        self.set_multiple(PrepareUpdateParams{
+        self.set_multiple(PrepareUpdateParams {
             amount: None,
             expires_at: None,
             execution_condition: None,
@@ -262,19 +262,20 @@ impl Prepare {
                     &mut expires_at_to_be[0..EXPIRY_LEN],
                     "{}",
                     DateTime::<Utc>::from(value).format(INTERLEDGER_TIMESTAMP_FORMAT),
-                ).ok();
-            },
+                )
+                .ok();
+            }
             None => {
                 let expires_at_begin = self.content_offset + AMOUNT_LEN;
                 let expires_at_end = expires_at_begin + EXPIRY_LEN;
                 expires_at_to_be.clone_from_slice(&self.buffer[expires_at_begin..expires_at_end]);
-            },
+            }
         };
         let execution_condition_to_be = match params.execution_condition {
             Some(value) => Cow::Borrowed(value),
             None => {
                 let execution_condition = self.execution_condition();
-                let mut execution_condition_copy = [0u8;CONDITION_LEN];
+                let mut execution_condition_copy = [0u8; CONDITION_LEN];
                 execution_condition_copy.clone_from_slice(execution_condition);
                 Cow::Owned(execution_condition_copy)
             }

@@ -4,7 +4,7 @@ use core::borrow::Borrow;
 use futures::future::{err, ok};
 use futures::{Future, IntoFuture};
 use interledger_packet::{oer::BufOerExt, ErrorCode, PrepareBuilder, RejectBuilder};
-use interledger_packet::{Fulfill, Prepare, Reject};
+use interledger_packet::{Fulfill, Prepare, Reject, PrepareUpdateParams};
 use interledger_service::*;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
@@ -119,7 +119,9 @@ where
             return self.get_invalid_prefix_error();
         }
 
-        let mut reader = request.prepare.data();
+        let mut reader = Vec::<u8>::with_capacity(request.prepare.data().len());
+        reader.extend_from_slice(request.prepare.data());
+        let mut reader: &[u8] = reader.borrow();
         reader.skip(ECHO_PREFIX.len()).ok();
         let echo_packet_type = reader.read_u8().unwrap();
         let source_address = reader.read_var_octet_string().unwrap();
@@ -134,11 +136,13 @@ where
         data_buffer.put_u8(EchoPacketType::Response as u8);
 
         // change prepare parameters to be routed as appropriate
-        request.prepare.set_destination(source_address);
-        request
-            .prepare
-            .set_expires_at(request.prepare.expires_at() - Duration::from_millis(1000));
-        request.prepare.set_data(data_buffer.borrow());
+        request.prepare.set_multiple(PrepareUpdateParams {
+            amount: None,
+            expires_at: Some(request.prepare.expires_at() - Duration::from_millis(1000)),
+            execution_condition: None,
+            destination: Some(source_address),
+            data: Some(data_buffer.borrow()),
+        });
 
         return Box::new(self.next_incoming.handle_request(request));
     }

@@ -14,4 +14,4 @@ pub use self::errors::ParseError;
 
 pub use self::packet::MaxPacketAmountDetails;
 pub use self::packet::{Fulfill, Packet, PacketType, Prepare, Reject};
-pub use self::packet::{FulfillBuilder, PrepareBuilder, RejectBuilder};
+pub use self::packet::{FulfillBuilder, PrepareBuilder, RejectBuilder, PrepareUpdateParams};
