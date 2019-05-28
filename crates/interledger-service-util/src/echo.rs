@@ -66,7 +66,7 @@ where
         return self.get_error_response(
             ErrorCode::F01_INVALID_PACKET,
             format!("packet data too short for echo request. length={}", length).as_str(),
-            &[],
+            self.get_own_address().as_bytes(),
             &[],
         );
     }
@@ -75,7 +75,7 @@ where
         return self.get_error_response(
             ErrorCode::F01_INVALID_PACKET,
             "packet data does not start with ECHO prefix.",
-            &[],
+            self.get_own_address().as_bytes(),
             &[],
         );
     }
@@ -84,7 +84,7 @@ where
         return self.get_error_response(
             ErrorCode::F01_INVALID_PACKET,
             "unexpected echo response.",
-            &[],
+            self.get_own_address().as_bytes(),
             &[],
         );
     }

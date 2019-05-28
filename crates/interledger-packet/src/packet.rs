@@ -4,6 +4,7 @@ use std::io::prelude::*;
 use std::io::Cursor;
 use std::str;
 use std::time::SystemTime;
+use std::borrow::Cow;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
@@ -123,6 +124,15 @@ pub struct Prepare {
     data_offset: usize,
 }
 
+/// The struct when updating Prepare with multiple parameters efficiently
+pub struct PrepareUpdateParams<'a> {
+    amount: Option<u64>,
+    expires_at: Option<SystemTime>,
+    execution_condition: Option<&'a [u8; 32]>,
+    destination: Option<&'a [u8]>,
+    data: Option<&'a [u8]>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrepareBuilder<'a> {
     pub amount: u64,
@@ -210,37 +220,13 @@ impl Prepare {
 
     #[inline]
     pub fn set_destination(&mut self, destination: &[u8]) {
-        // copy some items from buffer, not to be cleared
-        let execution_condition = self.execution_condition();
-        let mut execution_condition_copy = Vec::with_capacity(execution_condition.len());
-        execution_condition_copy.extend_from_slice(execution_condition);
-        let data = self.data();
-        let mut data_copy = Vec::with_capacity(data.len());
-        data_copy.extend_from_slice(data);
-        let expires_at_begin = self.content_offset + AMOUNT_LEN;
-        let expires_at_end = expires_at_begin + EXPIRY_LEN;
-        let mut expires_at_copy = [0u8; EXPIRY_LEN];
-        expires_at_copy.clone_from_slice(&self.buffer[expires_at_begin..expires_at_end]);
-
-        // calculate size of each item
-        const STATIC_LEN: usize = AMOUNT_LEN + EXPIRY_LEN + CONDITION_LEN;
-        let destination_size = oer::predict_var_octet_string(destination.len());
-        let data_size = oer::predict_var_octet_string(data_copy.len());
-        let content_len = STATIC_LEN + destination_size + data_size;
-        let buf_size = 1 + oer::predict_var_octet_string(content_len);
-
-        // put into the buffer
-        self.buffer.resize(buf_size, 0);
-        self.buffer.clear();
-        self.buffer.put_u8(PacketType::Prepare as u8);
-        self.buffer.put_var_octet_string_length(content_len);
-        self.content_offset = self.buffer.len();
-        self.buffer.put_u64_be(self.amount);
-        self.buffer.put_slice(&expires_at_copy);
-        self.buffer.put_slice(&execution_condition_copy);
-        self.buffer.put_var_octet_string(destination);
-        self.data_offset = self.buffer.len();
-        self.buffer.put_var_octet_string(data_copy);
+        self.set_multiple(PrepareUpdateParams{
+            amount: None,
+            expires_at: None,
+            execution_condition: None,
+            destination: Some(destination),
+            data: None,
+        });
     }
 
     #[inline]
@@ -252,22 +238,70 @@ impl Prepare {
 
     #[inline]
     pub fn set_data(&mut self, data: &[u8]) {
-        // copy some items from buffer, not to be cleared
-        let execution_condition = self.execution_condition();
-        let mut execution_condition_copy = Vec::with_capacity(execution_condition.len());
-        execution_condition_copy.extend_from_slice(execution_condition);
-        let destination = self.destination();
-        let mut destination_copy = Vec::with_capacity(destination.len());
-        destination_copy.extend_from_slice(destination);
-        let expires_at_begin = self.content_offset + AMOUNT_LEN;
-        let expires_at_end = expires_at_begin + EXPIRY_LEN;
-        let mut expires_at_copy = [0u8; EXPIRY_LEN];
-        expires_at_copy.clone_from_slice(&self.buffer[expires_at_begin..expires_at_end]);
+        self.set_multiple(PrepareUpdateParams{
+            amount: None,
+            expires_at: None,
+            execution_condition: None,
+            destination: None,
+            data: Some(data),
+        });
+    }
+
+    #[inline]
+    /// Sets multiple parameters efficiently
+    pub fn set_multiple(&mut self, params: PrepareUpdateParams) {
+        // copy some items from buffer if needed, not to be cleared
+        let amount_to_be = match params.amount {
+            Some(value) => value,
+            None => self.amount,
+        };
+        let mut expires_at_to_be = [0u8; EXPIRY_LEN];
+        match params.expires_at {
+            Some(value) => {
+                write!(
+                    &mut expires_at_to_be[0..EXPIRY_LEN],
+                    "{}",
+                    DateTime::<Utc>::from(value).format(INTERLEDGER_TIMESTAMP_FORMAT),
+                ).ok();
+            },
+            None => {
+                let expires_at_begin = self.content_offset + AMOUNT_LEN;
+                let expires_at_end = expires_at_begin + EXPIRY_LEN;
+                expires_at_to_be.clone_from_slice(&self.buffer[expires_at_begin..expires_at_end]);
+            },
+        };
+        let execution_condition_to_be = match params.execution_condition {
+            Some(value) => Cow::Borrowed(value),
+            None => {
+                let execution_condition = self.execution_condition();
+                let mut execution_condition_copy = [0u8;CONDITION_LEN];
+                execution_condition_copy.clone_from_slice(execution_condition);
+                Cow::Owned(execution_condition_copy)
+            }
+        };
+        let destination_to_be = match params.destination {
+            Some(value) => Cow::Borrowed(value),
+            None => {
+                let destination = self.destination();
+                let mut destination_copy = Vec::with_capacity(destination.len());
+                destination_copy.extend_from_slice(destination);
+                Cow::Owned(destination_copy)
+            }
+        };
+        let data_to_be = match params.data {
+            Some(value) => Cow::Borrowed(value),
+            None => {
+                let data = self.data();
+                let mut data_copy = Vec::with_capacity(data.len());
+                data_copy.extend_from_slice(data);
+                Cow::Owned(data_copy)
+            }
+        };
 
         // calculate size of each item
         const STATIC_LEN: usize = AMOUNT_LEN + EXPIRY_LEN + CONDITION_LEN;
-        let destination_size = oer::predict_var_octet_string(destination_copy.len());
-        let data_size = oer::predict_var_octet_string(data.len());
+        let destination_size = oer::predict_var_octet_string(destination_to_be.len());
+        let data_size = oer::predict_var_octet_string(data_to_be.len());
         let content_len = STATIC_LEN + destination_size + data_size;
         let buf_size = 1 + oer::predict_var_octet_string(content_len);
 
@@ -277,12 +311,12 @@ impl Prepare {
         self.buffer.put_u8(PacketType::Prepare as u8);
         self.buffer.put_var_octet_string_length(content_len);
         self.content_offset = self.buffer.len();
-        self.buffer.put_u64_be(self.amount);
-        self.buffer.put_slice(&expires_at_copy);
-        self.buffer.put_slice(&execution_condition_copy);
-        self.buffer.put_var_octet_string(destination_copy);
+        self.buffer.put_u64_be(amount_to_be);
+        self.buffer.put_slice(&expires_at_to_be);
+        self.buffer.put_slice(execution_condition_to_be.as_ref());
+        self.buffer.put_var_octet_string(destination_to_be.as_ref());
         self.data_offset = self.buffer.len();
-        self.buffer.put_var_octet_string(data);
+        self.buffer.put_var_octet_string(data_to_be.as_ref());
     }
 
     #[inline]
