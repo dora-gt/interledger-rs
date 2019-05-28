@@ -1,5 +1,4 @@
 use hex;
-use std::borrow::Cow;
 use std::fmt;
 use std::io::prelude::*;
 use std::io::Cursor;
@@ -12,6 +11,7 @@ use chrono::{DateTime, TimeZone, Utc};
 
 use super::oer::{self, BufOerExt, MutBufOerExt};
 use super::{ErrorCode, ParseError};
+use core::borrow::Borrow;
 
 const AMOUNT_LEN: usize = 8;
 const EXPIRY_LEN: usize = 17;
@@ -248,6 +248,11 @@ impl Prepare {
     }
 
     #[inline]
+    pub fn into_data(mut self) -> BytesMut {
+        oer::extract_var_octet_string(self.buffer.split_off(self.data_offset)).unwrap()
+    }
+
+    #[inline]
     /// Sets multiple parameters efficiently
     pub fn set_multiple(&mut self, params: PrepareUpdateParams) {
         // copy some items from buffer if needed, not to be cleared
@@ -263,7 +268,7 @@ impl Prepare {
                     "{}",
                     DateTime::<Utc>::from(value).format(INTERLEDGER_TIMESTAMP_FORMAT),
                 )
-                .ok();
+                    .ok();
             }
             None => {
                 let expires_at_begin = self.content_offset + AMOUNT_LEN;
@@ -271,31 +276,34 @@ impl Prepare {
                 expires_at_to_be.clone_from_slice(&self.buffer[expires_at_begin..expires_at_end]);
             }
         };
+        let mut execution_condition_copy; // this is not determined to use thus far
         let execution_condition_to_be = match params.execution_condition {
-            Some(value) => Cow::Borrowed(value),
+            Some(value) => value,
             None => {
                 let execution_condition = self.execution_condition();
-                let mut execution_condition_copy = [0u8; CONDITION_LEN];
+                execution_condition_copy = [0u8; CONDITION_LEN];
                 execution_condition_copy.clone_from_slice(execution_condition);
-                Cow::Owned(execution_condition_copy)
+                &execution_condition_copy
             }
         };
+        let mut destination_copy; // this is not determined to use thus far
         let destination_to_be = match params.destination {
-            Some(value) => Cow::Borrowed(value),
+            Some(value) => value,
             None => {
                 let destination = self.destination();
-                let mut destination_copy = Vec::with_capacity(destination.len());
+                destination_copy = Vec::with_capacity(destination.len());
                 destination_copy.extend_from_slice(destination);
-                Cow::Owned(destination_copy)
+                destination_copy.borrow()
             }
         };
+        let mut data_copy; // this is not determined to use thus far
         let data_to_be = match params.data {
-            Some(value) => Cow::Borrowed(value),
+            Some(value) => value,
             None => {
                 let data = self.data();
-                let mut data_copy = Vec::with_capacity(data.len());
+                data_copy = Vec::with_capacity(data.len());
                 data_copy.extend_from_slice(data);
-                Cow::Owned(data_copy)
+                data_copy.borrow()
             }
         };
 
@@ -314,15 +322,10 @@ impl Prepare {
         self.content_offset = self.buffer.len();
         self.buffer.put_u64_be(amount_to_be);
         self.buffer.put_slice(&expires_at_to_be);
-        self.buffer.put_slice(execution_condition_to_be.as_ref());
-        self.buffer.put_var_octet_string(destination_to_be.as_ref());
+        self.buffer.put_slice(execution_condition_to_be);
+        self.buffer.put_var_octet_string(destination_to_be);
         self.data_offset = self.buffer.len();
-        self.buffer.put_var_octet_string(data_to_be.as_ref());
-    }
-
-    #[inline]
-    pub fn into_data(mut self) -> BytesMut {
-        oer::extract_var_octet_string(self.buffer.split_off(self.data_offset)).unwrap()
+        self.buffer.put_var_octet_string(data_to_be);
     }
 }
 
