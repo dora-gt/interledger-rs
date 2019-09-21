@@ -10,7 +10,7 @@ error_and_exit() {
 
 # 31 = Red
 # 32 = Green
-# 33 =
+# 33 = Yellow
 colored_output() {
     local color="${1:-31}"
     local style="${2:-1}"
@@ -21,6 +21,7 @@ colored_output() {
 check_command() {
     local command=$1
     local install_name=$2
+    local install_command=$3
 
     printf "Checking if you have ${command}..."
     which ${command}
@@ -90,6 +91,33 @@ prompt_with_message() {
     eval "${variable_name}=\"${answer}\""
 }
 
+# $1 = prompt text
+# $2 = default value in [yn]
+# sets PROMPT_ANSWER in [yn]
+#
+# prompt_yn "Quit? [y/N]" n
+function prompt_yn() {
+    if [ $# -ne 2 ]; then
+        return 1
+    fi
+    local text=$1
+    local default=$2
+    if ! [[ $default =~ [yn] ]]; then
+        return 2
+    fi
+    read -p "$text" -n 1 answer
+    if [[ "$answer" =~ ^[^yYnN]+ ]]; then
+        printf "\n"
+        prompt_yn "$text" "$default"
+        return $?
+    fi
+    case "$answer" in
+        [Yy]) PROMPT_ANSWER=y;;
+        [Nn]) PROMPT_ANSWER=n;;
+        *) PROMPT_ANSWER=$default;;
+    esac
+}
+
 configure() {
     if [ -e "${CONFIG_NAME}" ]; then
         error_and_exit "${CONFIG_NAME} already exists.\nIf you want to override, try -f option."
@@ -111,7 +139,7 @@ configure() {
     secret_seed=$(openssl rand -hex 32) || error_and_exit "Could not generate secret_seed."
 
     # export config.json
-    cat "${BASE_DIR}/${CONFIG_TEMPLATE_NAME}" | sed \
+    cat "${CONFIG_TEMPLATE_FILE}" | sed \
         -e "s/<ilp_address>/${ilp_address}/g" \
         -e "s/<secret_seed>/${secret_seed}/g" \
         -e "s/<admin_auth_token>/${admin_auth_token}/g" \
@@ -129,6 +157,17 @@ free_ports() {
     # node
     if lsof -tPi :7770 >/dev/null ; then
         kill `lsof -tPi :7770`
+    fi
+}
+
+stop_localtunnels() {
+    if [ -e "${IOH_PID_FILE}" ]; then
+        kill $(<"${IOH_PID_FILE}")
+        rm "${IOH_PID_FILE}"
+    fi
+    if [ -e "${BTP_PID_FILE}" ]; then
+        kill $(<"${BTP_PID_FILE}")
+        rm "${BTP_PID_FILE}"
     fi
 }
 
@@ -161,14 +200,27 @@ spin_up() {
 set_up_localtunnel() {
     printf "Setting up localtunnels..."
     local ilp_address=$(cat ${CONFIG_NAME} | jq -r ".ilp_address") || error_and_exit "Could not load ilp_address from ${CONFIG_NAME}."
-    lt -s "ioh.${ilp_address}" -p 7770 || error_and_exit "Could not open a tunnel to 7770." &
-    lt -s "btp.${ilp_address}" -p 7768 || error_and_exit "Could not open a tunnel to 7768." &
+    # because localtunnel doesn't accept subdomains which contain dot
+    ilp_address=${ilp_address//\./-}
+    IOH_LT_SUBDOMAIN="ioh-${ilp_address}"
+    BTP_LT_SUBDOMAIN="btp-${ilp_address}"
+    lt -p 7770 -s "${IOH_LT_SUBDOMAIN}" &>logs/lt_ilp_over_http.log &
+    printf "$!" > ${IOH_PID_FILE}
+    lt -p 7768 -s "${BTP_LT_SUBDOMAIN}" &>logs/lt_btp.log &
+    printf "$!" > ${BTP_PID_FILE}
     colored_output 32 1 "done\n"
+    colored_output 33 21 "ILP over HTTP URL: $(get_localtunnel_url ${IOH_LT_SUBDOMAIN})\n"
+    colored_output 33 21 "BTP URL: $(get_localtunnel_url ${BTP_LT_SUBDOMAIN})\n"
+}
+
+get_localtunnel_url() {
+    printf "http://%s.localtunnel.me" "${1}"
 }
 
 stop_services() {
     printf "Shutting down services..."
     free_ports
+    stop_localtunnels
     colored_output 32 1 "done\n"
 }
 
@@ -210,12 +262,13 @@ add_accounts() {
     # create Xpring account json
     # TODO: Xpring ilp_address in unknown
     # TODO: do we need BTP connections?
-    local xpring_account_json=$(cat "${BASE_DIR}/${ACCOUNT_TEMPLATE_NAME}" | sed \
+    local xpring_account_json=$(cat "${ACCOUNT_TEMPLATE_FILE}" | sed \
         -e "/btp_endpoint/d" \
         -e "s/<user_name>/xpring/g" \
         -e "s/<ilp_address>/test.rs3.xpring.dev/g" \
         -e "s/<asset_code>/${credential_asset_code}/g" \
         -e "s/<asset_scale>/${credential_asset_scale}/g" \
+        -e "s/<min_balance>/-1000/g" \
         -e "s/<http_incoming_token>/${xpring_secret}/g" \
         -e "s/<http_outgoing_token>/${credential_username}:${credential_passkey}/g" \
         -e "s~<http_endpoint>~${http_endpoint}~g")
@@ -232,15 +285,16 @@ add_accounts() {
     colored_output 32 1 "done\n"
 
     # create out account json
-    local our_account_json=$(cat "${BASE_DIR}/${ACCOUNT_TEMPLATE_NAME}" | sed \
-        -e "/btp_endpoint/d" \
+    local our_account_json=$(cat "${ACCOUNT_TEMPLATE_FILE}" | sed \
         -e "s/<user_name>/${credential_username}/g" \
         -e "s/<ilp_address>/${ilp_address}/g" \
         -e "s/<asset_code>/${credential_asset_code}/g" \
         -e "s/<asset_scale>/${credential_asset_scale}/g" \
+        -e "s/<min_balance>/-1000/g" \
         -e "s/<http_incoming_token>/${our_secret}/g" \
         -e "s/<http_outgoing_token>/xpring:${xpring_secret}/g" \
-        -e "s~<http_endpoint>~https://ioh.${ilp_address}.localtunnel.me~g")
+        -e "s~<btp_endpoint>~https://${BTP_LT_SUBDOMAIN}.localtunnel.me~g" \
+        -e "s~<http_endpoint>~https://${IOH_LT_SUBDOMAIN}.localtunnel.me~g")
 
     # insert our account into Xpring's node
     printf "Inserting our account into Xpring's node..."
@@ -279,13 +333,19 @@ shift $(($OPTIND - 1))
 BASE_DIR=$(cd $(dirname $0); pwd)
 CONFIG_NAME="config.json"
 CONFIG_TEMPLATE_NAME="config-template.json"
+CONFIG_TEMPLATE_FILE="${BASE_DIR}/${CONFIG_TEMPLATE_NAME}"
 ACCOUNT_TEMPLATE_NAME="account-template.json"
+ACCOUNT_TEMPLATE_FILE="${BASE_DIR}/${ACCOUNT_TEMPLATE_NAME}"
+IOH_PID_FILE="logs/lt_ioh.pid"
+BTP_PID_FILE="logs/lt_btp.pid"
 export RUST_LOG=interledger=trace
 
 # check commands
 check_command "lt" "localtunnel"
 check_command "jq" "jq"
 check_command "openssl" "openssl"
+check_command "redis-server" "redis"
+check_command "cargo" "Rust"
 
 if [ "${CLEAR_CACHE}" = "1" ]; then
     if [ -e "${CONFIG_NAME}" ]; then

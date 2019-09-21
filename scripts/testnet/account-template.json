@@ -3,6 +3,7 @@
   "ilp_address": "<ilp_address>",
   "asset_code": "<asset_code>",
   "asset_scale": <asset_scale>,
+  "min_balance": <min_balance>,
   "btp_endpoint": "<btp_endpoint>",
   "http_incoming_token": "<http_incoming_token>",
   "http_outgoing_token": "<http_outgoing_token>",
