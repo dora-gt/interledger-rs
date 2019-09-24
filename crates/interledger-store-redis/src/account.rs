@@ -96,38 +96,18 @@ impl Account {
                 })?,
         };
 
-        let http_endpoint = if let Some(ref url) = details.http_endpoint {
+        let http_server_url = if let Some(ref url) = details.http_server_url {
             Some(Url::parse(url).map_err(|err| error!("Invalid URL: {:?}", err))?)
         } else {
             None
         };
 
-        let (btp_uri, btp_outgoing_token) = if let Some(ref url) = details.btp_uri {
-            let mut btp_uri = Url::parse(url).map_err(|err| error!("Invalid URL: {:?}", err))?;
-            let username = btp_uri.username();
-            let btp_outgoing_token = if username != "" {
-                btp_uri.password().map(|password| {
-                    SecretBytes::from(Bytes::from(format!("{}:{}", username, password)))
-                })
-            } else {
-                None
-            };
-            btp_uri.set_username("").unwrap();
-            btp_uri.set_password(None).unwrap();
-            (Some(btp_uri), btp_outgoing_token)
+        let btp_server_url = if let Some(ref url) = details.btp_server_url {
+            Some(Url::parse(url).map_err(|err| error!("Invalid URL: {:?}", err))?)
         } else {
-            (None, None)
+            None
         };
 
-        let http_incoming_token = details
-            .http_incoming_token
-            .map(|token| SecretBytes::from(Bytes::from(token)));
-        let btp_incoming_token = details
-            .btp_incoming_token
-            .map(|token| SecretBytes::from(Bytes::from(token)));
-        let http_outgoing_token = details
-            .http_outgoing_token
-            .map(|token| SecretBytes::from(Bytes::from(token)));
         let routing_relation = if let Some(ref relation) = details.routing_relation {
             RoutingRelation::from_str(relation)?
         } else {
@@ -147,12 +127,12 @@ impl Account {
             asset_scale: details.asset_scale,
             max_packet_amount: details.max_packet_amount,
             min_balance: details.min_balance,
-            http_endpoint,
-            http_incoming_token,
-            http_outgoing_token,
-            btp_uri,
-            btp_incoming_token,
-            btp_outgoing_token,
+            http_endpoint: http_server_url,
+            http_incoming_token: details.http_incoming_token,
+            http_outgoing_token: details.http_outgoing_token,
+            btp_uri: btp_server_url,
+            btp_incoming_token: details.btp_incoming_token,
+            btp_outgoing_token: details.btp_outgoing_token,
             settle_to: details.settle_to,
             settle_threshold: details.settle_threshold,
             routing_relation,

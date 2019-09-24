@@ -10,6 +10,7 @@ use interledger_service::Username;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio::runtime::Builder as RuntimeBuilder;
+use secrecy::{ExposeSecret, SecretBytes, SecretString};
 
 mod test_helpers;
 use test_helpers::{
@@ -91,8 +92,8 @@ fn eth_ledger_settlement() {
                     asset_scale: eth_decimals,
                     btp_incoming_token: None,
                     btp_uri: None,
-                    http_endpoint: None,
-                    http_incoming_token: Some("in_alice".to_string()),
+                    http_server_url: None,
+                    http_incoming_token: Some(SecretBytes::new("in_alice".to_string())),
                     http_outgoing_token: None,
                     max_packet_amount: 10,
                     min_balance: None,
@@ -112,9 +113,9 @@ fn eth_ledger_settlement() {
                         asset_scale: eth_decimals,
                         btp_incoming_token: None,
                         btp_uri: None,
-                        http_endpoint: Some(format!("http://localhost:{}/ilp", node2_http)),
-                        http_incoming_token: Some("alice".to_string()),
-                        http_outgoing_token: Some("alice:bob".to_string()),
+                        http_server_url: Some(format!("http://localhost:{}/ilp", node2_http)),
+                        http_incoming_token: Some(SecretBytes::new("alice".to_string())),
+                        http_outgoing_token: Some(SecretBytes::new("alice:bob".to_string())),
                         max_packet_amount: 10,
                         min_balance: Some(-100),
                         settle_threshold: Some(70),
@@ -160,7 +161,7 @@ fn eth_ledger_settlement() {
                     asset_scale: eth_decimals,
                     btp_incoming_token: None,
                     btp_uri: None,
-                    http_endpoint: None,
+                    http_server_url: None,
                     http_incoming_token: Some("in_bob".to_string()),
                     http_outgoing_token: None,
                     max_packet_amount: 10,
@@ -182,7 +183,7 @@ fn eth_ledger_settlement() {
                             asset_scale: eth_decimals,
                             btp_incoming_token: None,
                             btp_uri: None,
-                            http_endpoint: Some(format!("http://localhost:{}/ilp", node1_http)),
+                            http_server_url: Some(format!("http://localhost:{}/ilp", node1_http)),
                             http_incoming_token: Some("bob".to_string()),
                             http_outgoing_token: Some("bob:alice".to_string()),
                             max_packet_amount: 10,

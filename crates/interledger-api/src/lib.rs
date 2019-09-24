@@ -7,7 +7,7 @@ use interledger_service::{Account, AddressStore, IncomingService, OutgoingServic
 use interledger_service_util::{BalanceStore, ExchangeRateStore};
 use interledger_settlement::{SettlementAccount, SettlementStore};
 use interledger_stream::StreamNotificationsStore;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::{
     error::Error as StdError,
     fmt::{self, Display},
@@ -17,6 +17,7 @@ use warp::{self, Filter};
 mod routes;
 use interledger_btp::{BtpAccount, BtpOutgoingService};
 use interledger_ccp::CcpRoutingAccount;
+use secrecy::{SecretString, SecretBytes};
 
 pub(crate) mod http_retry;
 
@@ -106,12 +107,16 @@ pub struct AccountDetails {
     #[serde(default = "u64::max_value")]
     pub max_packet_amount: u64,
     pub min_balance: Option<i64>,
-    pub http_endpoint: Option<String>,
-    // TODO use Secrets here
-    pub http_incoming_token: Option<String>,
-    pub http_outgoing_token: Option<String>,
-    pub btp_uri: Option<String>,
-    pub btp_incoming_token: Option<String>,
+    pub http_server_url: Option<String>,
+    #[serde(serialize_with = "optional_secret_bytes_to_utf8")]
+    pub http_incoming_token: Option<SecretBytes>,
+    #[serde(serialize_with = "optional_secret_bytes_to_utf8")]
+    pub http_outgoing_token: Option<SecretBytes>,
+    pub btp_server_url: Option<String>,
+    #[serde(serialize_with = "optional_secret_bytes_to_utf8")]
+    pub btp_outgoing_token: Option<SecretBytes>,
+    #[serde(serialize_with = "optional_secret_bytes_to_utf8")]
+    pub btp_incoming_token: Option<SecretBytes>,
     pub settle_threshold: Option<i64>,
     pub settle_to: Option<i64>,
     pub routing_relation: Option<String>,
@@ -119,6 +124,16 @@ pub struct AccountDetails {
     pub amount_per_minute_limit: Option<u64>,
     pub packets_per_minute_limit: Option<u32>,
     pub settlement_engine_url: Option<String>,
+}
+
+fn optional_secret_bytes_to_utf8<S>(
+    _bytes: &Option<SecretBytes>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+{
+    serializer.serialize_str("SECRET")
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -43,7 +43,7 @@ fn polls_for_route_updates() {
                                 asset_code: "XYZ".to_string(),
                                 max_packet_amount: 1000,
                                 min_balance: Some(-1000),
-                                http_endpoint: None,
+                                http_server_url: None,
                                 http_incoming_token: None,
                                 http_outgoing_token: None,
                                 btp_uri: None,

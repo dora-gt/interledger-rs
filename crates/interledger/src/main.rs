@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use clap::{crate_version, App, AppSettings, Arg, ArgMatches, SubCommand};
 use config::{Config, Source};
 use config::{FileFormat, Value};
@@ -7,6 +8,7 @@ use interledger::node::{insert_account_redis, tokio_run, AccountDetails, Interle
 use interledger_packet::Address;
 use interledger_service::Username;
 use libc::{c_int, isatty};
+use secrecy::{ExposeSecret, SecretBytes, SecretString};
 use serde::Deserialize;
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
@@ -144,22 +146,46 @@ pub fn main() {
                                 .takes_value(true)
                                 .required(true)
                                 .help("Scale of the asset this account's balance is denominated in (a scale of 2 means that 100.50 will be represented as 10050) Refer to https://bit.ly/2ZlOy9n"),
-                            Arg::with_name("btp_incoming_token")
-                                .long("btp_incoming_token")
-                                .takes_value(true)
-                                .help("BTP token this account will use to connect"),
                             Arg::with_name("btp_server_url")
                                 .long("btp_server_url")
                                 .takes_value(true)
                                 .help("URI of a BTP server or moneyd that this account should use to connect"),
+                            Arg::with_name("btp_incoming_token")
+                                .long("btp_incoming_token")
+                                .takes_value(true)
+                                .help("BTP auth token they will use to authenticate with us"),
+                            Arg::with_name("btp_outgoing_token")
+                                .long("btp_outgoing_token")
+                                .takes_value(true)
+                                .help("BTP auth token we will use to authenticate with them"),
                             Arg::with_name("http_server_url")
                                 .long("http_server_url")
                                 .takes_value(true)
                                 .help("URL of the ILP-Over-HTTP endpoint that should be used when sending outgoing requests to this account"),
-                            Arg::with_name("http_incoming_token")
-                                .long("http_incoming_token")
+                            Arg::with_name("http_incoming_bearer_token")
+                                .long("http_incoming_bearer_token")
                                 .takes_value(true)
                                 .help("Bearer token this account will use to authenticate HTTP requests sent to this server"),
+                            Arg::with_name("http_incoming_basic_auth_username")
+                                .long("http_incoming_basic_auth_username")
+                                .takes_value(true)
+                                .help("Basic auth username this account will use to authenticate HTTP requests sent to this server"),
+                            Arg::with_name("http_incoming_basic_auth_password")
+                                .long("http_incoming_basic_auth_password")
+                                .takes_value(true)
+                                .help("Basic auth password this account will use to authenticate HTTP requests sent to this server"),
+                            Arg::with_name("http_outgoing_bearer_token")
+                                .long("http_outgoing_bearer_token")
+                                .takes_value(true)
+                                .help("Bearer token this account will use to authenticate HTTP requests sent to their server"),
+                            Arg::with_name("http_outgoing_basic_auth_username")
+                                .long("http_outgoing_basic_auth_username")
+                                .takes_value(true)
+                                .help("Basic auth username this account will use to authenticate HTTP requests sent to their server"),
+                            Arg::with_name("http_outgoing_basic_auth_password")
+                                .long("http_outgoing_basic_auth_password")
+                                .takes_value(true)
+                                .help("Basic auth password this account will use to authenticate HTTP requests sent to their server"),
                             Arg::with_name("settle_threshold")
                                 .long("settle_threshold")
                                 .takes_value(true)
@@ -371,26 +397,6 @@ fn is_fd_tty(file_descriptor: c_int) -> bool {
 }
 
 fn run_node_accounts_add(opt: NodeAccountsAddOpt) {
-    let (http_endpoint, http_outgoing_token) = if let Some(url) = &opt.http_server_url {
-        let url = Url::parse(url).expect("Invalid URL");
-        let auth = if !url.username().is_empty() {
-            Some(format!(
-                "Basic {}",
-                base64::encode(&format!(
-                    "{}:{}",
-                    url.username(),
-                    url.password().unwrap_or("")
-                ))
-            ))
-        } else if let Some(password) = url.password() {
-            Some(format!("Bearer {}", password))
-        } else {
-            None
-        };
-        (Some(url.to_string()), auth)
-    } else {
-        (None, None)
-    };
     let redis_url = Url::parse(&opt.redis_url).expect("redis_url is not a valid URI");
     let server_secret: [u8; 32] = {
         let mut server_secret = [0; 32];
@@ -404,14 +410,12 @@ fn run_node_accounts_add(opt: NodeAccountsAddOpt) {
         username: Username::from_str(&opt.username).unwrap(),
         asset_code: opt.asset_code.clone(),
         asset_scale: opt.asset_scale,
+        btp_server_url: opt.btp_server_url.clone(),
         btp_incoming_token: opt.btp_incoming_token.clone(),
-        btp_uri: opt.btp_server_url.clone(),
-        http_incoming_token: opt
-            .http_incoming_token
-            .clone()
-            .map(|s| format!("Bearer {}", s)),
-        http_outgoing_token,
-        http_endpoint,
+        btp_outgoing_token: opt.btp_outgoing_token.clone(),
+        http_incoming_token: opt.get_http_incoming_token(),
+        http_outgoing_token: opt.get_http_outgoing_token(),
+        http_server_url: opt.http_server_url.clone(),
         max_packet_amount: u64::max_value(),
         min_balance: Some(opt.min_balance),
         settle_threshold: opt.settle_threshold,
@@ -433,10 +437,16 @@ struct NodeAccountsAddOpt {
     username: String,
     asset_code: String,
     asset_scale: u8,
-    btp_incoming_token: Option<String>,
     btp_server_url: Option<String>,
+    btp_incoming_token: Option<SecretBytes>,
+    btp_outgoing_token: Option<SecretBytes>,
     http_server_url: Option<String>,
-    http_incoming_token: Option<String>,
+    http_incoming_bearer_token: Option<SecretString>,
+    http_incoming_basic_auth_username: Option<String>,
+    http_incoming_basic_auth_password: Option<SecretString>,
+    http_outgoing_bearer_token: Option<SecretString>,
+    http_outgoing_basic_auth_username: Option<String>,
+    http_outgoing_basic_auth_password: Option<SecretString>,
     settle_threshold: Option<i64>,
     settle_to: Option<i64>,
     routing_relation: String,
@@ -444,4 +454,68 @@ struct NodeAccountsAddOpt {
     round_trip_time: u32,
     packets_per_minute_limit: Option<u32>,
     amount_per_minute_limit: Option<u64>,
+}
+
+impl NodeAccountsAddOpt {
+    fn get_http_incoming_token(&self) -> Option<SecretBytes> {
+        if self.http_incoming_basic_auth_username.is_some()
+            && self.http_incoming_bearer_token.is_some()
+        {
+            panic!("Cannot specify basic-auth and bearer token at the same time!");
+        }
+        if self.http_incoming_basic_auth_username.is_some() {
+            let userinfo = base64::encode(&format!(
+                "{}:{}",
+                self.http_incoming_basic_auth_username.clone().unwrap(),
+                match &self.http_incoming_basic_auth_password {
+                    Some(password) => password.expose_secret(),
+                    None => "",
+                }
+            ));
+            return Some(SecretBytes::from(Bytes::from(format!(
+                "Basic {}",
+                userinfo
+            ))));
+        } else if self.http_incoming_bearer_token.is_some() {
+            return Some(SecretBytes::from(Bytes::from(format!(
+                "Bearer {}",
+                self.http_incoming_bearer_token
+                    .clone()
+                    .unwrap()
+                    .expose_secret()
+            ))));
+        }
+        None
+    }
+
+    fn get_http_outgoing_token(&self) -> Option<SecretBytes> {
+        if self.http_outgoing_basic_auth_username.is_some()
+            && self.http_outgoing_bearer_token.is_some()
+        {
+            panic!("Cannot specify basic-auth and bearer token at the same time!");
+        }
+        if self.http_outgoing_basic_auth_username.is_some() {
+            let userinfo = base64::encode(&format!(
+                "{}:{}",
+                self.http_outgoing_basic_auth_username.clone().unwrap(),
+                match &self.http_outgoing_basic_auth_password {
+                    Some(password) => password.expose_secret(),
+                    None => "",
+                }
+            ));
+            return Some(SecretBytes::from(Bytes::from(format!(
+                "Basic {}",
+                userinfo
+            ))));
+        } else if self.http_outgoing_bearer_token.is_some() {
+            return Some(SecretBytes::from(Bytes::from(format!(
+                "Bearer {}",
+                self.http_outgoing_bearer_token
+                    .clone()
+                    .unwrap()
+                    .expose_secret()
+            ))));
+        }
+        None
+    }
 }
