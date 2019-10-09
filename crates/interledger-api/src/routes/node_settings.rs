@@ -1,4 +1,4 @@
-use crate::error::{ApiError, ApiErrorType, ProblemType};
+use crate::error::*;
 use crate::{deserialize_json, http_retry::Client, NodeStore};
 use bytes::Buf;
 use futures::{
@@ -40,7 +40,7 @@ where
             if authorization == admin_auth_header {
                 Ok(())
             } else {
-                Err(ApiError::default_unauthorized().into())
+                Err(ApiError::unauthorized().into())
             }
         })
         // This call makes it so we do not pass on a () value on
@@ -75,7 +75,7 @@ where
                     Ok(warp::reply::json(&rates))
                 } else {
                     error!("Error setting exchange rates");
-                    Err(ApiError::default_internal_server_error().into())
+                    Err(ApiError::internal_server_error().into())
                 }
             },
         )
@@ -91,7 +91,7 @@ where
                 Ok(warp::reply::json(&rates))
             } else {
                 error!("Error getting exchange rates");
-                Err(ApiError::default_internal_server_error().into())
+                Err(ApiError::internal_server_error().into())
             }
         })
         .boxed();
@@ -140,7 +140,7 @@ where
                     .set_static_routes(parsed.clone())
                     .map_err::<_, Rejection>(|_| {
                         error!("Error setting static routes");
-                        ApiError::default_internal_server_error().into()
+                        ApiError::internal_server_error().into()
                     })
                     .map(move |_| warp::reply::json(&parsed)),
             )
@@ -164,7 +164,7 @@ where
                             .set_static_route(prefix, id)
                             .map_err::<_, Rejection>(|_| {
                                 error!("Error setting static route");
-                                ApiError::default_internal_server_error().into()
+                                ApiError::internal_server_error().into()
                             })
                             .map(move |_| id.to_string()),
                     );
@@ -191,7 +191,7 @@ where
                 .set_settlement_engines(asset_to_url_map.clone())
                 .map_err::<_, Rejection>(|_| {
                     error!("Error setting settlement engines");
-                    ApiError::default_internal_server_error().into()
+                    ApiError::internal_server_error().into()
                 })
                 .and_then(move |_| {
                     // Create the accounts on the settlement engines for any
@@ -204,9 +204,7 @@ where
                     // all of the accounts from the database into memory
                     // (even if this isn't called often, it could crash the node at some point)
                     store.get_all_accounts()
-                        .map_err(|_| {
-                            ApiError::default_internal_server_error().into()
-                        })
+                        .map_err(|_| ApiError::internal_server_error().into())
                     .and_then(move |accounts| {
                         let client = Client::default();
                         let create_settlement_accounts =
@@ -217,9 +215,7 @@ where
                                 if let Some(details) = account.settlement_engine_details() {
                                     if Some(&details.url) == asset_to_url_map.get(account.asset_code()) {
                                         return Some(client.create_engine_account(details.url, account.id())
-                                            .map_err(|_| {
-                                                ApiError::default_internal_server_error().into()
-                                            })
+                                            .map_err(|_| ApiError::internal_server_error().into())
                                             .and_then(move |status_code| {
                                                 if status_code.is_success() {
                                                     trace!("Account {} created on the SE", id);
@@ -249,21 +245,15 @@ where
         .boxed()
 }
 
-// Settings specific error
-const INVALID_ACCOUNT_ID_TYPE: ApiErrorType = ApiErrorType {
-    r#type: &ProblemType::InterledgerHttpApi("settings/invalid-account-id"),
-    title: "Invalid Account Id",
-};
-
 impl ApiError {
     fn invalid_account_id(invalid_account_id: Option<&str>) -> Self {
-        let detail = match invalid_account_id {
+        let detail = Some(match invalid_account_id {
             Some(invalid_account_id) => match invalid_account_id.len() {
                 0 => "Account ID is empty".to_owned(),
                 _ => format!("{} is an invalid account ID", invalid_account_id),
             },
             None => "Invalid string was given as an account ID".to_owned(),
-        };
-        ApiError::bad_request(&INVALID_ACCOUNT_ID_TYPE, Some(detail), None, None)
+        });
+        ApiError::from_api_error_type(&INVALID_ACCOUNT_ID_TYPE).detail(detail)
     }
 }

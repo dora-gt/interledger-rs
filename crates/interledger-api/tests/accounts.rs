@@ -67,13 +67,16 @@ fn accounts_test() {
     };
     let node_to_serve = node.clone();
     let node_context = move |_| Ok(node);
+    /*
     let wait_a_sec = |node| {
         thread::sleep(Duration::from_millis(1000));
         Ok(node)
     };
+    */
 
     let get_accounts = move |node: InterledgerNode| {
         // GET /accounts
+        println!("Testing: GET /accounts");
         let client = reqwest::r#async::Client::new();
         client
             .get(&format!(
@@ -98,6 +101,7 @@ fn accounts_test() {
 
     let post_accounts_1 = move |node: InterledgerNode| {
         // POST /accounts
+        println!("Testing: POST /accounts");
         let client = reqwest::r#async::Client::new();
         client
             .post(&format!(
@@ -190,6 +194,7 @@ fn accounts_test() {
 
     let post_accounts_2 = move |node: InterledgerNode| {
         // POST /accounts
+        println!("Testing: POST /accounts");
         let client = reqwest::r#async::Client::new();
         client
             .post(&format!(
@@ -272,6 +277,7 @@ fn accounts_test() {
 
     let put_accounts_username = move |node: InterledgerNode| {
         // PUT /accounts/:username
+        println!("Testing: PUT /accounts/:username");
         let client = reqwest::r#async::Client::new();
         client
             .put(&format!(
@@ -326,6 +332,7 @@ fn accounts_test() {
 
     let get_accounts_username = move |node: InterledgerNode| {
         // GET /accounts/:username
+        println!("Testing: GET /accounts/:username");
         let client = reqwest::r#async::Client::new();
         client
             .get(&format!(
@@ -376,6 +383,7 @@ fn accounts_test() {
 
     let get_accounts_username_balance = move |node: InterledgerNode| {
         // GET /accounts/:username/balance
+        println!("Testing: GET /accounts/:username/balance");
         let client = reqwest::r#async::Client::new();
         client
             .get(&format!(
@@ -397,6 +405,7 @@ fn accounts_test() {
                 if let Value::Object(balance) = json {
                     // TODO why isn't this a number?
                     //assert_eq!(account.get("balance").expect("balance was expected"), &Value::Number(Number::from(0)));
+                    println!("content: {}", &content);
                     assert_eq!(
                         balance.get("balance").expect("balance was expected"),
                         &Value::String("0".to_owned())
@@ -410,6 +419,7 @@ fn accounts_test() {
 
     let put_accounts_username_settings = move |node: InterledgerNode| {
         // PUT /accounts/:username/settings
+        println!("Testing: PUT /accounts/:username/settings");
         let client = reqwest::r#async::Client::new();
         client
             .put(&format!(
@@ -452,6 +462,7 @@ fn accounts_test() {
 
     let delete_accounts_username = move |node: InterledgerNode| {
         // DELETE /accounts/:username
+        println!("Testing: DELETE /accounts/:username");
         let client = reqwest::r#async::Client::new();
         client
             .delete(&format!(
@@ -494,6 +505,7 @@ fn accounts_test() {
 
     let post_accounts_username_payments = move |node: InterledgerNode| {
         // POST /accounts/:username/payments
+        println!("Testing: POST /accounts/:username/payments");
         let amount = 100;
         let client = reqwest::r#async::Client::new();
         client
@@ -527,6 +539,7 @@ fn accounts_test() {
 
     let get_accounts_username_spsp = move |node: InterledgerNode| {
         // GET /accounts/:username/spsp
+        println!("Testing: GET /accounts/:username/spsp");
         let client = reqwest::r#async::Client::new();
         client
             .get(&format!(
@@ -577,6 +590,7 @@ fn accounts_test() {
 
     let get_well_known_pay = move |node: InterledgerNode| {
         // GET /.well-known/pay
+        println!("Testing: GET /.well-known/pay");
         let client = reqwest::r#async::Client::new();
         client
             .get(&format!(
@@ -634,14 +648,14 @@ fn accounts_test() {
                 .and_then(put_accounts_username)
                 .and_then(get_accounts_username)
                 .and_then(get_accounts_username_balance)
-                .and_then(put_accounts_username_settings)
-                .and_then(delete_accounts_username)
-                .and_then(post_accounts_1)
-                .and_then(post_accounts_2)
-                .and_then(wait_a_sec) // Seems that we need to wait a while after the account insertions.
-                .and_then(post_accounts_username_payments)
-                .and_then(get_accounts_username_spsp)
-                .and_then(get_well_known_pay),
+//                .and_then(put_accounts_username_settings)
+//                .and_then(delete_accounts_username)
+//                .and_then(post_accounts_1)
+//                .and_then(post_accounts_2)
+//                .and_then(wait_a_sec) // Seems that we need to wait a while after the account insertions.
+//                .and_then(post_accounts_username_payments)
+//                .and_then(get_accounts_username_spsp)
+//                .and_then(get_well_known_pay),
         )
         .expect("Could not spin up node and tests.");
 }
