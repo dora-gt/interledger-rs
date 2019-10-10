@@ -4,10 +4,7 @@ use crate::{
     NodeStore,
 };
 use bytes::Bytes;
-use futures::{
-    future::{err, join_all, ok, Either},
-    Future, Stream,
-};
+use futures::{future::{err, join_all, ok, Either}, Future, Stream, IntoFuture};
 use interledger_btp::{connect_to_service_account, BtpAccount, BtpOutgoingService};
 use interledger_ccp::{CcpRoutingAccount, Mode, RouteControlRequest, RoutingRelation};
 use interledger_http::{HttpAccount, HttpStore};
@@ -80,6 +77,7 @@ where
         .untuple_one()
         .boxed();
     let with_store = warp::any().map(move || store.clone()).boxed();
+    let with_admin_api_token = warp::any().map(move || admin_api_token.clone()).boxed();
     let with_incoming_handler = warp::any().map(move || incoming_handler.clone()).boxed();
     // Note that the following `accounts*` and `account*` filters are based on the path of `accounts`.
     // These filters should be applied before anything so that some other functions or filters
@@ -142,6 +140,41 @@ where
         .unify()
         .boxed();
 
+    // Acquires authorization header and checks if the username from it exists in the DB and
+    // the username from path is the same as one from DB.
+    // Returns Option<A::AccountId>, None if not authorized, Some if authorized.
+    let is_admin_or_authorized_user_with_id = account_username
+        .and(warp::header::<AuthToken>("authorization"))
+        .and(with_store.clone())
+        .and(with_admin_api_token.clone())
+        .and_then(move |path_username: Username, auth: AuthToken, store: S, admin_api_token: String| {
+            store
+                .get_account_from_http_auth(auth.username(), auth.password())
+                .then(move |authorized_account: Result<A, _>|{
+                    if authorized_account.is_err() {
+                        Ok(None)
+                    } else {
+                        let authorized_account = authorized_account.unwrap();
+                        let is_authorized_user = &path_username == authorized_account.username();
+                        let is_admin = auth.password() == admin_api_token;
+                        if is_admin || is_authorized_user {
+                            Ok(Some(authorized_account.id()))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                })
+                .map_err::<_, Rejection>(move |_:()| ApiError::internal_server_error().into())
+        })
+        .boxed();
+
+    // Receives Option<A::AccountId> and rejects if None if given, which means unauthorized.
+    let admin_or_authorized_user_only = |id: Option<A::AccountId>| -> Result<_, Rejection> {
+        match id {
+            Some(id) => Ok(id),
+            None => Err(ApiError::unauthorized().into())
+        }
+    };
 
     // POST /accounts
     let btp_clone = btp.clone();
@@ -207,9 +240,9 @@ where
     // GET /accounts/:username
     // Auth: admin or authorized_account
     let get_account = warp::get2()
-        .and(account_username_to_id.clone())
+        .and(is_admin_or_authorized_user_with_id.clone())
         .and(warp::path::end())
-        // auth
+        .and_then(admin_or_authorized_user_only.clone())
         .and(with_store.clone())
         .and_then(|id: A::AccountId, store: S| {
             println!("came here: GET /accounts/:username");
@@ -228,10 +261,10 @@ where
     // GET /accounts/:username/balance
     // Auth: admin or authorized_account
     let get_account_balance = warp::get2()
-        .and(account_username_to_id.clone())
+        .and(is_admin_or_authorized_user_with_id.clone())
         .and(warp::path("balance"))
         .and(warp::path::end())
-        // auth
+        .and_then(admin_or_authorized_user_only.clone())
         .and(with_store.clone())
         .and_then(|id: A::AccountId, store: S| {
             // TODO reduce the number of store calls it takes to get the balance
