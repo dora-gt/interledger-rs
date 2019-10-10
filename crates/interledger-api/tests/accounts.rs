@@ -67,12 +67,10 @@ fn accounts_test() {
     };
     let node_to_serve = node.clone();
     let node_context = move |_| Ok(node);
-    /*
     let wait_a_sec = |node| {
         thread::sleep(Duration::from_millis(1000));
         Ok(node)
     };
-    */
 
     let get_accounts = move |node: InterledgerNode| {
         // GET /accounts
@@ -405,7 +403,6 @@ fn accounts_test() {
                 if let Value::Object(balance) = json {
                     // TODO why isn't this a number?
                     //assert_eq!(account.get("balance").expect("balance was expected"), &Value::Number(Number::from(0)));
-                    println!("content: {}", &content);
                     assert_eq!(
                         balance.get("balance").expect("balance was expected"),
                         &Value::String("0".to_owned())
@@ -648,14 +645,14 @@ fn accounts_test() {
                 .and_then(put_accounts_username)
                 .and_then(get_accounts_username)
                 .and_then(get_accounts_username_balance)
-//                .and_then(put_accounts_username_settings)
-//                .and_then(delete_accounts_username)
-//                .and_then(post_accounts_1)
-//                .and_then(post_accounts_2)
-//                .and_then(wait_a_sec) // Seems that we need to wait a while after the account insertions.
-//                .and_then(post_accounts_username_payments)
-//                .and_then(get_accounts_username_spsp)
-//                .and_then(get_well_known_pay),
+                .and_then(put_accounts_username_settings)
+                .and_then(delete_accounts_username)
+                .and_then(post_accounts_1)
+                .and_then(post_accounts_2)
+                .and_then(wait_a_sec) // Seems that we need to wait a while after the account insertions.
+                .and_then(post_accounts_username_payments)
+                .and_then(get_accounts_username_spsp)
+                .and_then(get_well_known_pay),
         )
         .expect("Could not spin up node and tests.");
 }
