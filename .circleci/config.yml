@@ -145,17 +145,16 @@ jobs:
             PROFILE: "release"
       - run:
           name: Push to DockerHub
-          # TODO tag properly
           command: |
             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
 
             DOCKER_IMAGE_TAG=$(./docker/CI/get_docker_image_tag.sh ilp-node ${CIRCLE_TAG})
             echo "Pushing docker image of tag: interledgerrs/node:${DOCKER_IMAGE_TAG}"
-            # docker push interledgerrs/node:${DOCKER_IMAGE_TAG}
+            docker push interledgerrs/node:${DOCKER_IMAGE_TAG}
 
             DOCKER_IMAGE_TAG=$(./docker/CI/get_docker_image_tag.sh ilp-cli ${CIRCLE_TAG})
             echo "Pushing docker image of tag: interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}"
-            # docker push interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}
+            docker push interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
@@ -175,6 +174,6 @@ workflows:
             tags:
               only: # whatever tagged binary crates
                 - /^(ilp-node-|ilp-cli-).*$/
-#          requires:
-#            - build
-#            - test-md
+          requires:
+            - build
+            - test-md
