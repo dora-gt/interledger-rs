@@ -2,6 +2,7 @@
 
 # intended to be run in the top directory
 docker_image_tag=${DOCKER_IMAGE_TAG:-latest}
+
 build_targets=()
 
 if [ "$PROFILE" = "release" ]; then
@@ -24,6 +25,8 @@ fi
 
 # if arguments are given, add it as build targets
 build_targets+=($@)
+
+printf "\e[32;1mBuilding docker image with tag: ${docker_image_tag}\e[m\n"
 
 for build_target in "${build_targets[@]}"; do
     case $build_target in

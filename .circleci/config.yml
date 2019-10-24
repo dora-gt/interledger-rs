@@ -136,14 +136,14 @@ jobs:
           # builds release profile images to be released
           name: Build docker images
           command: |
-            export DOCKER_IMAGE_TAG=${CIRCLE_TAG:-latest}
-            docker/docker-build.sh node ilp-cli
+            DOCKER_IMAGE_TAG=${CIRCLE_TAG:-latest} docker/docker-build.sh node ilp-cli
           environment:
             PROFILE: "release"
       - run:
           name: Push to DockerHub
           # TODO tag properly
           command: |
+            DOCKER_IMAGE_TAG=${CIRCLE_TAG:-latest}
             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
             echo "pushing docker images of tag: ${DOCKER_IMAGE_TAG}"
             # docker push interledgerrs/node:${DOCKER_IMAGE_TAG}
@@ -162,7 +162,7 @@ workflows:
       - update-docker-images: # updates docker images on DockerHub, only if the branch is master or something is tagged
           filters:
             branches:
-              only:
+              only: # master branch will be tagged as `latest` image
                 - master
             tags:
               only: # whatever tagged binary crates
