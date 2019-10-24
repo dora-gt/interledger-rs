@@ -135,7 +135,9 @@ jobs:
       - run:
           # builds release profile images to be released
           name: Build docker images
-          command: docker/docker-build.sh node ilp-cli
+          command: |
+            export DOCKER_IMAGE_TAG=${CIRCLE_TAG:-latest}
+            docker/docker-build.sh node ilp-cli
           environment:
             PROFILE: "release"
       - run:
@@ -143,8 +145,9 @@ jobs:
           # TODO tag properly
           command: |
             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-            docker push interledgerrs/node:latest
-            docker push interledgerrs/ilp-cli:latest
+            echo "pushing docker images of tag: ${DOCKER_IMAGE_TAG}"
+            docker push interledgerrs/node:${DOCKER_IMAGE_TAG}
+            docker push interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
@@ -156,11 +159,14 @@ workflows:
     jobs:
       - build
       - test-md
-      - update-docker-images: # updates docker images on DockerHub, only if the branch is master
+      - update-docker-images: # updates docker images on DockerHub, only if the branch is master or something is tagged
           filters:
             branches:
               only:
                 - master
+            tags:
+              only: # whatever tagged
+                - /^.*$/
           requires:
             - build
             - test-md
