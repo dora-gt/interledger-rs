@@ -136,17 +136,25 @@ jobs:
           # builds release profile images to be released
           name: Build docker images
           command: |
-            DOCKER_IMAGE_TAG=${CIRCLE_TAG:-latest} docker/docker-build.sh node ilp-cli
+            export DOCKER_IMAGE_TAG=$(./docker/CI/get_docker_image_tag.sh ilp-node ${CIRCLE_TAG})
+            docker/docker-build.sh node
+
+            export DOCKER_IMAGE_TAG=$(./docker/CI/get_docker_image_tag.sh ilp-cli ${CIRCLE_TAG})
+            docker/docker-build.sh ilp-cli
           environment:
             PROFILE: "release"
       - run:
           name: Push to DockerHub
           # TODO tag properly
           command: |
-            DOCKER_IMAGE_TAG=${CIRCLE_TAG:-latest}
             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-            echo "pushing docker images of tag: ${DOCKER_IMAGE_TAG}"
+
+            DOCKER_IMAGE_TAG=$(./docker/CI/get_docker_image_tag.sh ilp-node ${CIRCLE_TAG})
+            echo "Pushing docker image of tag: interledgerrs/node:${DOCKER_IMAGE_TAG}"
             # docker push interledgerrs/node:${DOCKER_IMAGE_TAG}
+
+            DOCKER_IMAGE_TAG=$(./docker/CI/get_docker_image_tag.sh ilp-cli ${CIRCLE_TAG})
+            echo "Pushing docker image of tag: interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}"
             # docker push interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
