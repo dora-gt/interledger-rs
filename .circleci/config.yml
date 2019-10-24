@@ -146,8 +146,8 @@ jobs:
           command: |
             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
             echo "pushing docker images of tag: ${DOCKER_IMAGE_TAG}"
-            docker push interledgerrs/node:${DOCKER_IMAGE_TAG}
-            docker push interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}
+            # docker push interledgerrs/node:${DOCKER_IMAGE_TAG}
+            # docker push interledgerrs/ilp-cli:${DOCKER_IMAGE_TAG}
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
@@ -165,8 +165,8 @@ workflows:
               only:
                 - master
             tags:
-              only: # whatever tagged
-                - /^.*$/
-          requires:
-            - build
-            - test-md
+              only: # whatever tagged binary crates
+                - /^(ilp-node-|ilp-cli-).*$/
+#          requires:
+#            - build
+#            - test-md
