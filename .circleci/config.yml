@@ -165,7 +165,15 @@ workflows:
   build_and_test-md:
     jobs:
       - build
+        filters:
+          tags:
+            only: # whatever tagged binary crates, we need this to kick builds when tags are given
+              - /^(ilp-node-|ilp-cli-).*$/
       - test-md
+          filters:
+            tags:
+              only: # whatever tagged binary crates, we need this to kick builds when tags are given
+                - /^(ilp-node-|ilp-cli-).*$/
       - update-docker-images: # updates docker images on DockerHub, only if the branch is master or something is tagged
           filters:
             branches:
