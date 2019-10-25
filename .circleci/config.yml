@@ -172,9 +172,9 @@ jobs:
       - setup_remote_docker:
           docker_layer_caching: true
       - persist_to_workspace:
-          root: /tmp/release-builds
+          root: /
           paths:
-            - x86_64-unknown-linux-musl
+            - release-builds/x86_64-unknown-linux-musl
       - checkout
       - restore_cache:
           keys:
@@ -182,13 +182,13 @@ jobs:
             - cargo-cache-2-{{ checksum "Cargo.lock" }}
             - cargo-cache-2-
       - run:
-          # builds release profile images to be released
+          # Builds release profile binaries to be released
+          # The artifact is stored in release-builds directory, which is persistent
           name: Build binary
           command: |
             crate_name=$(./circleci/release/get_crate_name.sh ${CIRCLE_TAG})
             ./.circleci/release/build.sh x86_64-unknown-linux-musl ${crate_name}
-            mkdir -p /tmp/release-builds/x86_64-unknown-linux-musl/
-            cp target/x86_64-unknown-linux-musl/release/ilp-node /tmp/release-builds/x86_64-unknown-linux-musl/
+            cp target/x86_64-unknown-linux-musl/release/${crate_name} release-builds/x86_64-unknown-linux-musl/${crate_name}
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
@@ -200,9 +200,9 @@ jobs:
       - setup_remote_docker:
           docker_layer_caching: true
       - persist_to_workspace:
-          root: /tmp/release-builds
+          root: /
           paths:
-            - x86_64-unknown-linux-musl
+            - release-builds/x86_64-unknown-linux-musl
       - checkout
       - run:
           name: Release Binaries
@@ -212,8 +212,8 @@ jobs:
             # linux musl
             musl_zip="${crate_name}-linux-musl.zip"
             musl_tar_gz="${crate_name}-linux-musl.tar.gz"
-            zip -j ${musl_zip} /tmp/release-builds/target/x86_64-unknown-linux-musl/release/${crate_name}
-            tar -zcvf ${musl_tar_gz} -C /tmp/release-builds/target/x86_64-unknown-linux-musl/release ${crate_name}
+            zip -j ${musl_zip} release-builds/x86_64-unknown-linux-musl/${crate_name}
+            tar -zcvf ${musl_tar_gz} -C release-builds/x86_64-unknown-linux-musl ${crate_name}
 
             # TODO macOS
 
