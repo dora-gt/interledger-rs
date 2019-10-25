@@ -185,6 +185,7 @@ jobs:
             crate_name=$(./.circleci/release/get_crate_name.sh ${CIRCLE_TAG})
             printf "Building crate_name: %s, tag: %s\n" "${crate_name}" "${CIRCLE_TAG}"
             ./.circleci/release/build.sh x86_64-unknown-linux-musl ${crate_name}
+            mkdir -p release-builds/x86_64-unknown-linux-musl
             cp target/x86_64-unknown-linux-musl/release/${crate_name} release-builds/x86_64-unknown-linux-musl/${crate_name}
       - persist_to_workspace:
           root: /
