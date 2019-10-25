@@ -19,7 +19,7 @@ function get_content_type() {
 }
 
 function push_release() {
-    local repository="dora-gt/interledger-rs"
+    local repository="interledger-rs/interledger-rs"
     local user_agent="curl-on-CircleCI"
     local tag_name="$1"
     local release_name="$2"

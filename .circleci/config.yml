@@ -221,6 +221,9 @@ jobs:
             echo "Release of ${CIRCLE_TAG}" > release.txt
 
             ./.circleci/release/github_release.sh ${CIRCLE_TAG} ${CIRCLE_TAG} release.txt ${musl_zip} ${musl_tar_gz}
+      - store_artifacts:
+          path: logs
+          destination: release-binaries-logs
 
 workflows:
   version: 2
