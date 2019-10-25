@@ -190,7 +190,7 @@ jobs:
       - persist_to_workspace:
           root: /
           paths:
-            - release-builds/x86_64-unknown-linux-musl
+            - release-builds/x86_64-unknown-linux-musl/*
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
