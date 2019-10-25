@@ -22,7 +22,7 @@ jobs:
             - cargo-cache-2-{{ checksum "Cargo.lock" }}
             - cargo-cache-2-
       - run:
-          name: Reduce codegen units
+          name: Reduce codegen Units
           # If we don't include this, the linker runs out of memory when building
           # the project on CI. We don't include this normally though because
           # it should be able to build with more units on other machines
@@ -107,7 +107,7 @@ jobs:
       - run:
           # builds dev profile images because these images are not going to be released
           # also, we have to copy binaries so remove target from .dockerignore
-          name: Build docker images
+          name: Build Docker Images
           command: |
             dockerignore=$(cat .dockerignore | sed /^target/d)
             echo "$dockerignore" > .dockerignore
@@ -117,7 +117,7 @@ jobs:
             echo "target/**/incremental" >> .dockerignore
             docker/docker-build.sh ci-node ci-ilp-cli
       - run:
-          name: Run run-md test
+          name: Run run-md Test
           command: scripts/run-md-test.sh
       - store_artifacts:
           path: /tmp/run-md-test
@@ -140,7 +140,7 @@ jobs:
             - cargo-cache-2-
       - run:
           # builds release profile images to be released
-          name: Build docker images
+          name: Build Docker Images
           command: |
             export DOCKER_IMAGE_TAG=$(./.circleci/get_docker_image_tag.sh ilp-node ${CIRCLE_TAG})
             docker/docker-build.sh node
@@ -165,10 +165,66 @@ jobs:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
             - /home/circleci/.cargo
+  build-release-binary-linux:
+    docker:
+      - image: interledgerrs/circleci-rust-dind:latest
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - persist_to_workspace:
+          root: /tmp/release-builds
+          paths:
+            - x86_64-unknown-linux-musl
+      - checkout
+      - restore_cache:
+          keys:
+            - cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
+            - cargo-cache-2-{{ checksum "Cargo.lock" }}
+            - cargo-cache-2-
+      - run:
+          # builds release profile images to be released
+          name: Build binary
+          command: |
+            crate_name=$(./circleci/release/get_crate_name.sh ${CIRCLE_TAG})
+            ./.circleci/release/build.sh x86_64-unknown-linux-musl ${crate_name}
+            mkdir -p /tmp/release-builds/x86_64-unknown-linux-musl/
+            cp target/x86_64-unknown-linux-musl/release/ilp-node /tmp/release-builds/x86_64-unknown-linux-musl/
+      - save_cache:
+          key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
+          paths:
+            - /home/circleci/.cargo
+  release-binaries:
+    docker:
+      - image: interledgerrs/circleci-rust-dind:latest
+    steps:
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - persist_to_workspace:
+          root: /tmp/release-builds
+          paths:
+            - x86_64-unknown-linux-musl
+      - checkout
+      - run:
+          name: Release Binaries
+          command: |
+            crate_name=$(./circleci/release/get_crate_name.sh ${CIRCLE_TAG})
+
+            # linux musl
+            musl_zip="${crate_name}-linux-musl.zip"
+            musl_tar_gz="${crate_name}-linux-musl.tar.gz"
+            zip -j ${musl_zip} /tmp/release-builds/target/x86_64-unknown-linux-musl/release/${crate_name}
+            tar -zcvf ${musl_tar_gz} -C /tmp/release-builds/target/x86_64-unknown-linux-musl/release ${crate_name}
+
+            # TODO macOS
+
+            # TODO add appropriate release text
+            echo "Release of ${CIRCLE_TAG}" > release.txt
+
+            ./.circleci/release/github_release.sh ${CIRCLE_TAG} ${CIRCLE_TAG} release.txt ${musl_zip} ${musl_tar_gz}
 
 workflows:
   version: 2
-  build_and_test-md:
+  test-and-release:
     jobs:
       - build:
           filters:
@@ -190,4 +246,17 @@ workflows:
                 - /^(ilp-node-|ilp-cli-).*$/
           requires:
             - build
-            - test-md
+      - build-release-binary-linux:
+          filters:
+            tags:
+              only: # whatever tagged binary crates
+                - /^(ilp-node-|ilp-cli-).*$/
+          requires:
+            - build
+      - release-binaries:
+          filters:
+            tags:
+              only: # whatever tagged binary crates
+                - /^(ilp-node-|ilp-cli-).*$/
+          requires:
+            - build-release-binary-linux
