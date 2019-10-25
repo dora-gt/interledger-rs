@@ -171,10 +171,6 @@ jobs:
     steps:
       - setup_remote_docker:
           docker_layer_caching: true
-      - persist_to_workspace:
-          root: /
-          paths:
-            - release-builds/x86_64-unknown-linux-musl
       - checkout
       - restore_cache:
           keys:
@@ -189,6 +185,10 @@ jobs:
             crate_name=$(./circleci/release/get_crate_name.sh ${CIRCLE_TAG})
             ./.circleci/release/build.sh x86_64-unknown-linux-musl ${crate_name}
             cp target/x86_64-unknown-linux-musl/release/${crate_name} release-builds/x86_64-unknown-linux-musl/${crate_name}
+      - persist_to_workspace:
+          root: /
+          paths:
+            - release-builds/x86_64-unknown-linux-musl
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
@@ -199,10 +199,8 @@ jobs:
     steps:
       - setup_remote_docker:
           docker_layer_caching: true
-      - persist_to_workspace:
-          root: /
-          paths:
-            - release-builds/x86_64-unknown-linux-musl
+      - attach_workspace:
+          at: /
       - checkout
       - run:
           name: Release Binaries
