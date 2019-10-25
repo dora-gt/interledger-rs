@@ -185,12 +185,12 @@ jobs:
             crate_name=$(./.circleci/release/get_crate_name.sh ${CIRCLE_TAG})
             printf "Building crate_name: %s, tag: %s\n" "${crate_name}" "${CIRCLE_TAG}"
             ./.circleci/release/build.sh x86_64-unknown-linux-musl ${crate_name}
-            mkdir -p release-builds/x86_64-unknown-linux-musl
-            cp target/x86_64-unknown-linux-musl/release/${crate_name} release-builds/x86_64-unknown-linux-musl/${crate_name}
+            mkdir -p /tmp/release-builds/x86_64-unknown-linux-musl
+            cp target/x86_64-unknown-linux-musl/release/${crate_name} /tmp/release-builds/x86_64-unknown-linux-musl/${crate_name}
       - persist_to_workspace:
-          root: /
+          root: /tmp/release-builds
           paths:
-            - release-builds/x86_64-unknown-linux-musl/*
+            - x86_64-unknown-linux-musl/*
       - save_cache:
           key: cargo-cache-2-{{ checksum "Cargo.lock" }}-{{ .Branch }}
           paths:
@@ -202,7 +202,7 @@ jobs:
       - setup_remote_docker:
           docker_layer_caching: true
       - attach_workspace:
-          at: /
+          at: /tmp/release-builds
       - checkout
       - run:
           name: Release Binaries
@@ -212,8 +212,8 @@ jobs:
             # linux musl
             musl_zip="${crate_name}-linux-musl.zip"
             musl_tar_gz="${crate_name}-linux-musl.tar.gz"
-            zip -j ${musl_zip} release-builds/x86_64-unknown-linux-musl/${crate_name}
-            tar -zcvf ${musl_tar_gz} -C release-builds/x86_64-unknown-linux-musl ${crate_name}
+            zip -j ${musl_zip} /tmp/release-builds/x86_64-unknown-linux-musl/${crate_name}
+            tar -zcvf ${musl_tar_gz} -C /tmp/release-builds/x86_64-unknown-linux-musl ${crate_name}
 
             # TODO macOS
 
