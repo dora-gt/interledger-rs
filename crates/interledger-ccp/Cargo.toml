@@ -21,3 +21,4 @@ ring = { version = "0.16.9", default-features = false }
 tokio-executor = { version = "0.1.8", default-features = false }
 tokio-timer = { version = "0.2.11", default-features = false }
 serde = { version = "1.0.101", default-features = false, features = ["derive"] }
+uuid = { version = "0.7", default-features = false }

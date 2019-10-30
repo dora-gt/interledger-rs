@@ -569,9 +569,11 @@ where
                             &incoming_tables,
                             prefix,
                         ) {
+                            trace!("best_next_account: {:#?}, best_route: {:#?}, local_table: {:#?}", best_next_account, best_route, local_table);
                             if let Some((ref next_account, ref route)) =
                                 local_table.get_route(prefix)
                             {
+                                trace!("got next_account: {:#?} and route: {:#?}", next_account, route);
                                 if next_account.id() == best_next_account.id() {
                                     continue;
                                 } else {
@@ -580,6 +582,7 @@ where
                                         next_account.clone(),
                                         route.clone(),
                                     ));
+                                    trace!("pushed better_routes: {:#?}", better_routes);
                                 }
                             } else {
                                 better_routes.push((prefix, best_next_account, best_route));
@@ -895,12 +898,21 @@ where
     }
 }
 
+use uuid::Uuid;
 fn get_best_route_for_prefix<A: CcpRoutingAccount>(
     local_routes: &HashMap<String, A>,
     configured_routes: &HashMap<String, A>,
     incoming_tables: &HashMap<A::AccountId, RoutingTable<A>>,
     prefix: &str,
 ) -> Option<(A, Route)> {
+    let uuid = Uuid::new_v4();
+    trace!("{} get_best_route_for_prefix-----", uuid);
+    trace!("{} prefix: {:#?}", uuid, prefix);
+    trace!("{} local_routes: {:#?}", uuid, &local_routes);
+    trace!("{} configured_routes: {:#?}", uuid, &configured_routes);
+    trace!("{} incoming_tables: {:#?}", uuid, &incoming_tables);
+    trace!("{} ------------------------------", uuid);
+
     // Check if we have a configured route for that specific prefix
     // or any shorter prefix ("example.a.b.c" will match "example.a.b" and "example.a")
     // Note that this logic is duplicated from the Address type. We are not using
@@ -910,6 +922,7 @@ fn get_best_route_for_prefix<A: CcpRoutingAccount>(
     for i in 0..segments.len() {
         let prefix = &segments[0..segments.len() - i].join(".");
         if let Some(account) = configured_routes.get(prefix) {
+            trace!("returning configured routes, account: {:?} for prefix: {:?}", account,  prefix);
             return Some((
                 account.clone(),
                 Route {
@@ -923,6 +936,7 @@ fn get_best_route_for_prefix<A: CcpRoutingAccount>(
     }
 
     if let Some(account) = local_routes.get(prefix) {
+        trace!("returning local routes, account: {:?} for prefix: {:?}", account, account.ilp_address());
         return Some((
             account.clone(),
             Route {
@@ -963,6 +977,7 @@ fn get_best_route_for_prefix<A: CcpRoutingAccount>(
                 }
             },
         );
+        trace!("returning incoming_tables, account: {:?} for prefix: {:?}", best_account, best_route.prefix);
         Some((best_account.clone(), best_route.clone()))
     } else {
         None
