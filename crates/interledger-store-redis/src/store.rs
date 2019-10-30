@@ -1317,6 +1317,7 @@ impl AddressStore for RedisStore {
                                         .with_suffix(account.username().as_bytes())
                                         .unwrap()
                                 };
+                            debug!("resetting ILP address {} ({}) to {}", &account.ilp_address as &str, account.id(), new_ilp_address);
                             pipe.hset(
                                 accounts_key(account.id()),
                                 "ilp_address",

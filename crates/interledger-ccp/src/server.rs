@@ -542,6 +542,7 @@ where
 
         self.store.get_local_and_configured_routes().and_then(
             move |(ref local_routes, ref configured_routes)| {
+                let uuid = Uuid::new_v4();
                 let (better_routes, withdrawn_routes) = {
                     // Note we only use a read lock here and later get a write lock if we need to update the table
                     let local_table = local_table.read();
@@ -569,11 +570,11 @@ where
                             &incoming_tables,
                             prefix,
                         ) {
-                            trace!("best_next_account: {:#?}, best_route: {:#?}, local_table: {:#?}", best_next_account, best_route, local_table);
+                            trace!("{} for prefix: {}, best_next_account: {:#?}, best_route: {:#?}, current local_table: {:#?}", uuid, prefix, best_next_account, best_route, local_table);
                             if let Some((ref next_account, ref route)) =
                                 local_table.get_route(prefix)
                             {
-                                trace!("got next_account: {:#?} and route: {:#?}", next_account, route);
+                                trace!("{} for prefix: {}, found current route, current next_account: {:#?} and route: {:#?}", uuid, prefix, next_account, route);
                                 if next_account.id() == best_next_account.id() {
                                     continue;
                                 } else {
@@ -582,10 +583,12 @@ where
                                         next_account.clone(),
                                         route.clone(),
                                     ));
-                                    trace!("pushed better_routes: {:#?}", better_routes);
+                                    trace!("{} pushed better_routes: {:#?}", uuid, better_routes);
                                 }
                             } else {
+                                trace!("{} for prefix: {}, NOT found current route", uuid, prefix);
                                 better_routes.push((prefix, best_next_account, best_route));
+                                trace!("{} pushed better_routes: {:#?}", uuid, better_routes);
                             }
                         } else {
                             // No longer have a route to this prefix
@@ -658,6 +661,8 @@ where
                         withdrawn_routes.iter().map(|s| s.to_string()).collect(),
                     ));
                     debug_assert_eq!(epoch as usize + 1, forwarding_table_updates.len());
+
+                    debug!("local_table is updated: {:#?}", local_table);
 
                     Either::A(
                         store.set_routes(
