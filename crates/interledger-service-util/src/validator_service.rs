@@ -61,11 +61,11 @@ where
 
     /// On receiving a request:
     /// 1. If the prepare packet in the request is not expired, forward it, otherwise return a reject
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> Self::Future {
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
         let expires_at = DateTime::<Utc>::from(request.prepare.expires_at());
         let now = Utc::now();
         if expires_at >= now {
-            Box::new(self.next.handle_request(request))
+            Box::new(self.next.handle_request(request, context))
         } else {
             error!(
                 "Incoming packet expired {}ms ago at {:?} (time now: {:?})",
@@ -101,7 +101,7 @@ where
     ///     - If the forwarding is successful, it should receive a fulfill packet. Depending on if the hash of the fulfillment condition inside the fulfill is a preimage of the condition of the prepare:
     ///         - return the fulfill if it matches
     ///         - otherwise reject
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> Self::Future {
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
         let mut condition: [u8; 32] = [0; 32];
         condition[..].copy_from_slice(request.prepare.execution_condition()); // why?
 
@@ -113,7 +113,7 @@ where
         if time_left > Duration::zero() {
             Box::new(
                 self.next
-                    .send_request(request)
+                    .send_request(request, context)
                     .timeout(time_left.to_std().expect("Time left must be positive"))
                     .map_err(move |err| {
                         // If the error was caused by the timer, into_inner will return None

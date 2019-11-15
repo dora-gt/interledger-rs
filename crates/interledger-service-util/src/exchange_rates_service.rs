@@ -85,6 +85,7 @@ where
     fn send_request(
         &mut self,
         mut request: OutgoingRequest<A>,
+        context: RequestContext,
     ) -> Box<dyn Future<Item = Fulfill, Error = Reject> + Send> {
         let ilp_address = self.store.get_ilp_address();
         if request.prepare.amount() > 0 {
@@ -186,7 +187,7 @@ where
             }
         }
 
-        Box::new(self.next.send_request(request))
+        Box::new(self.next.send_request(request, context))
     }
 }
 

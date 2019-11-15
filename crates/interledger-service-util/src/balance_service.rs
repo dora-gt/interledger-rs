@@ -89,13 +89,14 @@ where
     fn send_request(
         &mut self,
         request: OutgoingRequest<A>,
+        context: RequestContext,
     ) -> Box<dyn Future<Item = Fulfill, Error = Reject> + Send> {
         // Don't bother touching the store for zero-amount packets.
         // Note that it is possible for the original_amount to be >0 while the
         // prepare.amount is 0, because the original amount could be rounded down
         // to 0 when exchange rate and scale change are applied.
         if request.prepare.amount() == 0 && request.original_amount == 0 {
-            return Box::new(self.next.send_request(request));
+            return Box::new(self.next.send_request(request, context));
         }
 
         let mut next = self.next.clone();
@@ -140,7 +141,7 @@ where
                     .build()
                 })
                 .and_then(move |_| {
-                    next.send_request(request)
+                    next.send_request(request, context)
                         .and_then(move |fulfill| {
                             // We will spawn a task to update the balances in the database
                             // so that we DO NOT wait for the database before sending the

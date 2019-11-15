@@ -57,12 +57,12 @@ where
 {
     type Future = BoxedIlpFuture;
 
-    fn handle_request(&mut self, mut request: IncomingRequest<A>) -> Self::Future {
+    fn handle_request(&mut self, mut request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
         let ilp_address = self.store.get_ilp_address();
         let should_echo = request.prepare.destination() == ilp_address
             && request.prepare.data().starts_with(ECHO_PREFIX.as_bytes());
         if !should_echo {
-            return Box::new(self.next.handle_request(request));
+            return Box::new(self.next.handle_request(request, context));
         }
         debug!("Responding to Echo protocol request: {:?}", request);
 
@@ -90,7 +90,7 @@ where
         if echo_packet_type == EchoPacketType::Response as u8 {
             // if the echo packet type is Response, just pass it to the next service
             // so that the initiator could handle this packet
-            return Box::new(self.next.handle_request(request));
+            return Box::new(self.next.handle_request(request, context));
         }
         if echo_packet_type != EchoPacketType::Request as u8 {
             eprintln!("The packet type is not acceptable: {}", echo_packet_type);
@@ -150,7 +150,7 @@ where
         }
         .build();
 
-        Box::new(self.next.handle_request(request))
+        Box::new(self.next.handle_request(request, context))
     }
 }
 

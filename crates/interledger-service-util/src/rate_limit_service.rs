@@ -3,9 +3,7 @@ use futures::{
     Future,
 };
 use interledger_packet::{ErrorCode, RejectBuilder};
-use interledger_service::{
-    Account, AddressStore, BoxedIlpFuture, IncomingRequest, IncomingService,
-};
+use interledger_service::{Account, AddressStore, BoxedIlpFuture, IncomingRequest, IncomingService, RequestContext};
 use log::{error, warn};
 use std::marker::PhantomData;
 
@@ -88,7 +86,7 @@ where
     ///     - If it succeeds, OK
     ///     - If the request forwarding failed, the client should not be charged towards their throughput limit, so they are refunded, and return a reject
     /// 1. If the limit was hit, return a reject with the appropriate ErrorCode.
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> Self::Future {
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
         let ilp_address = self.store.get_ilp_address();
         let mut next = self.next.clone();
         let store = self.store.clone();
@@ -122,7 +120,7 @@ where
                     data: &[],
                 }.build()
             })
-            .and_then(move |_| next.handle_request(request))
+            .and_then(move |_| next.handle_request(request, context))
             .or_else(move |reject| {
                 if has_throughput_limit {
                     Either::A(store.refund_throughput_limit(account_clone, prepare_amount)
