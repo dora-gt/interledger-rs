@@ -225,8 +225,9 @@ where
 
     /// Convert this BtpOutgoingService into a bidirectional BtpService by adding a handler for incoming requests.
     /// This will automatically pull all incoming Prepare packets from the channel buffer and call the IncomingService with them.
-    pub fn handle_incoming<I>(self, incoming_handler: I) -> BtpService<I, O, A>
+    pub fn handle_incoming<S, I>(self, store: S, incoming_handler: I) -> BtpService<I, O, A>
     where
+        S: AddressStore + Clone + Send + Sync + 'static,
         I: IncomingService<A> + Clone + Send + 'static,
     {
         // Any connections that were added to the BtpOutgoingService will just buffer
@@ -241,43 +242,48 @@ where
             .take()
             .expect("handle_incoming can only be called once")
             .for_each(move |(account, request_id, prepare)| {
-                let account_id = account.id();
-                let connections_clone = connections_clone.clone();
-                let request = IncomingRequest {
-                    from: account,
-                    prepare,
-                };
-                trace!(
-                    "Handling incoming request {} from account: {} (id: {})",
-                    request_id,
-                    request.from.username(),
-                    request.from.id()
-                );
-                incoming_handler_clone
-                    .handle_request(request)
-                    .then(move |result| {
-                        let packet = match result {
-                            Ok(fulfill) => Packet::Fulfill(fulfill),
-                            Err(reject) => Packet::Reject(reject),
-                        };
-                        if let Some(connection) = connections_clone
-                            .read()
-                            .get(&account_id) {
-                            let message = ilp_packet_to_ws_message(request_id, packet);
-                            connection
-                                .clone()
-                                .unbounded_send(message)
-                                .map_err(move |err| {
-                                    error!(
-                                        "Error sending response to account: {} {:?}",
-                                        account_id, err
-                                    )
-                                })
+                store.get_ilp_address_lock().read().and_then(move|ilp_address_guard|{
+                    let ilp_address = ilp_address_guard.clone();
+                    let context = RequestContext::new(ilp_address);
+                    let account_id = account.id();
+                    let connections_clone = connections_clone.clone();
+                    let request = IncomingRequest {
+                        from: account,
+                        prepare,
+                    };
+                    trace!(
+                        "Handling incoming request {} from account: {} (id: {})",
+                        request_id,
+                        request.from.username(),
+                        request.from.id()
+                    );
+                    incoming_handler_clone
+                        .handle_request(request, context)
+                        .then(move |result| {
+                            drop(ilp_address_guard);
+                            let packet = match result {
+                                Ok(fulfill) => Packet::Fulfill(fulfill),
+                                Err(reject) => Packet::Reject(reject),
+                            };
+                            if let Some(connection) = connections_clone
+                                .read()
+                                .get(&account_id) {
+                                let message = ilp_packet_to_ws_message(request_id, packet);
+                                connection
+                                    .clone()
+                                    .unbounded_send(message)
+                                    .map_err(move |err| {
+                                        error!(
+                                            "Error sending response to account: {} {:?}",
+                                            account_id, err
+                                        )
+                                    })
                             } else {
                                 error!("Error sending response to account: {}, connection was closed. {:?}", account_id, packet);
                                 Err(())
                             }
-                    })
+                        })
+                })
             })
             .then(move |_| {
                 trace!("Finished reading from pending_incoming buffer");
@@ -303,7 +309,7 @@ where
     ///
     /// If there is no open connection for the Account specified in `request.to`, the
     /// request will be passed through to the `next` handler.
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> Self::Future {
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
         let account_id = request.to.id();
         if let Some(connection) = (*self.connections.read()).get(&account_id) {
             let request_id = random::<u32>();
@@ -376,9 +382,9 @@ where
                 "No open connection for account: {}, forwarding request to the next service",
                 request.to.id()
             );
-            Box::new(self.next.send_request(request))
+            Box::new(self.next.send_request(request, context))
         } else {
-            Box::new(self.next.send_request(request))
+            Box::new(self.next.send_request(request, context))
         }
     }
 }
@@ -412,8 +418,8 @@ where
     ///
     /// If there is no open connection for the Account specified in `request.to`, the
     /// request will be passed through to the `next` handler.
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> Self::Future {
-        self.outgoing.send_request(request)
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+        self.outgoing.send_request(request, context)
     }
 }
 

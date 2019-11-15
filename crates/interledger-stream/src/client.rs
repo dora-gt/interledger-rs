@@ -50,6 +50,7 @@ pub fn send_money<S, A>(
     destination_account: Address,
     shared_secret: &[u8],
     source_amount: u64,
+    context: RequestContext,
 ) -> impl Future<Item = (StreamDelivery, S), Error = Error>
 where
     S: IncomingService<A> + Clone,
@@ -57,8 +58,10 @@ where
 {
     let shared_secret = Bytes::from(shared_secret);
     let from_account = from_account.clone();
+    let context_clone = context.clone();
+
     // TODO can/should we avoid cloning the account?
-    get_ildcp_info(&mut service.clone(), from_account.clone())
+    get_ildcp_info(&mut service.clone(), from_account.clone(), context)
         .map_err(|_err| Error::ConnectionError("Unable to get ILDCP info: {:?}".to_string()))
         .and_then(move |account_details| {
             let source_account = account_details.ilp_address();
@@ -95,6 +98,7 @@ where
                 sequence: 1,
                 rejected_packets: 0,
                 error: None,
+                context: context_clone
             }
         })
 }
@@ -114,6 +118,7 @@ struct SendMoneyFuture<S: IncomingService<A>, A: Account> {
     sequence: u64,
     rejected_packets: u64,
     error: Option<Error>,
+    context: RequestContext,
 }
 
 struct PendingRequest {
@@ -192,7 +197,7 @@ where
                 let send_request = next.handle_request(IncomingRequest {
                     from: self.from_account.clone(),
                     prepare,
-                });
+                }, self.context.clone());
                 self.pending_requests.get_mut().push(PendingRequest {
                     sequence,
                     amount,
@@ -235,7 +240,7 @@ where
             let send_request = next.handle_request(IncomingRequest {
                 from: self.from_account.clone(),
                 prepare,
-            });
+            }, self.context.clone());
             self.pending_requests.get_mut().push(PendingRequest {
                 sequence,
                 amount: 0,

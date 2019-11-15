@@ -385,15 +385,15 @@ impl InterledgerNode {
                             let incoming_service = incoming_service.wrap(incoming_metrics);
 
                             // Handle incoming packets sent via BTP
-                            btp_server_service.handle_incoming(incoming_service.clone().wrap(|request, mut next| {
+                            btp_server_service.handle_incoming(store.clone(), incoming_service.clone().wrap(|request, context, mut next| {
                                 let btp = debug_span!(target: "interledger-node", "btp");
                                 let _btp_scope = btp.enter();
-                                next.handle_request(request).in_current_span()
+                                next.handle_request(request, context).in_current_span()
                             }).in_current_span());
-                            btp_client_service.handle_incoming(incoming_service.clone().wrap(|request, mut next| {
+                            btp_client_service.handle_incoming(store.clone(), incoming_service.clone().wrap(|request, context, mut next| {
                                 let btp = debug_span!(target: "interledger-node", "btp");
                                 let _btp_scope = btp.enter();
-                                next.handle_request(request).in_current_span()
+                                next.handle_request(request, context).in_current_span()
                             }).in_current_span());
 
                             // Node HTTP API

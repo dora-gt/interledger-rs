@@ -10,9 +10,7 @@ use interledger_http::{deserialize_json, error::*, HttpAccount, HttpStore};
 use interledger_ildcp::IldcpRequest;
 use interledger_ildcp::IldcpResponse;
 use interledger_router::RouterStore;
-use interledger_service::{
-    Account, AddressStore, AuthToken, IncomingService, OutgoingRequest, OutgoingService, Username,
-};
+use interledger_service::{Account, AddressStore, AuthToken, IncomingService, OutgoingRequest, OutgoingService, Username, AccountStore, RequestContext};
 use interledger_service_util::{BalanceStore, ExchangeRateStore};
 use interledger_settlement::core::types::SettlementAccount;
 use interledger_spsp::{pay, SpspResponder};
@@ -49,7 +47,9 @@ where
         + BalanceStore<Account = A>
         + StreamNotificationsStore<Account = A>
         + ExchangeRateStore
-        + RouterStore,
+        + RouterStore
+        + AddressStore
+        + 'static,
     A: BtpAccount
         + CcpRoutingAccount
         + SettlementAccount
@@ -362,22 +362,33 @@ where
         .and(authorized_user_only.clone())
         .and(deserialize_json())
         .and(with_incoming_handler.clone())
+        .and(with_store.clone())
         .and_then(
-            move |account: A, pay_request: SpspPayRequest, incoming_handler: I| {
-                pay(
-                    incoming_handler,
-                    account.clone(),
-                    &pay_request.receiver,
-                    pay_request.source_amount,
-                )
-                .and_then(move |receipt| {
-                    debug!("Sent SPSP payment, receipt: {:?}", receipt);
-                    Ok(warp::reply::json(&json!(receipt)))
-                })
-                .map_err::<_, Rejection>(|err| {
-                    error!("Error sending SPSP payment: {:?}", err);
-                    // TODO give a different error message depending on what type of error it is
-                    ApiError::internal_server_error().into()
+            move |account: A, pay_request: SpspPayRequest, incoming_handler: I, store| {
+                store.get_ilp_address_lock().read().and_then(|ilp_address_guard|{
+                    let ilp_address = ilp_address_guard.clone();
+                    let context = RequestContext::new(ilp_address);
+                    pay(
+                        incoming_handler,
+                        account.clone(),
+                        &pay_request.receiver,
+                        pay_request.source_amount,
+                        context,
+                    )
+                        .and_then(move |receipt| {
+                            debug!("Sent SPSP payment, receipt: {:?}", receipt);
+                            Ok(warp::reply::json(&json!(receipt)))
+                        })
+                        .map_err::<_, Rejection>(|err| {
+                            error!("Error sending SPSP payment: {:?}", err);
+                            // TODO give a different error message depending on what type of error it is
+                            ApiError::internal_server_error().into()
+                        })
+                        .then(|result|{
+                            // When the payment is done, the ILP address is released.
+                            drop(ilp_address_guard);
+                            result
+                        })
                 })
             },
         )

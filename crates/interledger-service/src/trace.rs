@@ -9,10 +9,10 @@ where
 {
     type Future = Instrumented<IO::Future>;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> Self::Future {
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
         let span = self.span().clone();
         let _enter = span.enter();
-        self.inner_mut().handle_request(request).in_current_span()
+        self.inner_mut().handle_request(request, context).in_current_span()
     }
 }
 
@@ -23,9 +23,9 @@ where
 {
     type Future = Instrumented<IO::Future>;
 
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> Self::Future {
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
         let span = self.span().clone();
         let _enter = span.enter();
-        self.inner_mut().send_request(request).in_current_span()
+        self.inner_mut().send_request(request, context).in_current_span()
     }
 }

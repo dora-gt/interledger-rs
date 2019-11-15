@@ -17,7 +17,7 @@ use interledger_packet::PrepareBuilder;
 use interledger_packet::{Address, ErrorCode, Fulfill, Reject, RejectBuilder};
 use interledger_service::{
     Account, AddressStore, BoxedIlpFuture, IncomingRequest, IncomingService, OutgoingRequest,
-    OutgoingService,
+    OutgoingService, RequestContext
 };
 #[cfg(test)]
 use lazy_static::lazy_static;
@@ -186,8 +186,6 @@ where
             Interval::new(Instant::now(), Duration::from_millis(interval))
                 .map_err(|err| error!("Interval error, no longer sending route updates: {:?}", err))
                 .for_each(move |_| {
-                    // ensure we have the latest ILP Address from the store
-                    clone.update_ilp_address();
                     // Returning an error would end the broadcast loop
                     // so we want to return Ok even if there was an error
                     clone.broadcast_routes().then(|_| Ok(()))
@@ -195,24 +193,21 @@ where
         })
     }
 
-    fn update_ilp_address(&self) {
-        let current_ilp_address = self.ilp_address.read();
-        let ilp_address = self.store.get_ilp_address();
-        if ilp_address != *current_ilp_address {
-            debug!(
-                "Changing ILP address from {} to {}",
-                *current_ilp_address, ilp_address
-            );
-            // release the read lock
-            drop(current_ilp_address);
-            *self.ilp_address.write() = ilp_address;
-        }
-    }
-
     pub fn broadcast_routes(&self) -> impl Future<Item = (), Error = ()> {
         let clone = self.clone();
-        self.update_best_routes(None)
-            .and_then(move |_| clone.send_route_updates())
+        let ilp_address_lock = self.store.get_ilp_address_lock();
+
+        ilp_address_lock.read().and_then(move |ilp_address_guard|{
+            let ilp_address = ilp_address_guard.clone();
+            let context = RequestContext::new(ilp_address);
+            clone.update_best_routes(None, context.clone())
+                .and_then(move |_| clone.send_route_updates(context))
+                .then(|result|{
+                    // When the updates are done, the ILP address is released.
+                    drop(ilp_address_guard);
+                    result
+                })
+        })
     }
 
     /// Request routes from all the peers we are willing to receive routes from.
@@ -235,12 +230,13 @@ where
     fn handle_route_control_request(
         &self,
         request: IncomingRequest<A>,
+        context: RequestContext
     ) -> impl Future<Item = Fulfill, Error = Reject> {
         if !request.from.should_send_routes() {
             return Either::A(err(RejectBuilder {
                 code: ErrorCode::F00_BAD_REQUEST,
                 message: b"We are not configured to send routes to you, sorry",
-                triggered_by: Some(&self.ilp_address.read()),
+                triggered_by: Some(&context.ilp_address),
                 data: &[],
             }
             .build()));
@@ -251,7 +247,7 @@ where
             return Either::A(err(RejectBuilder {
                 code: ErrorCode::F00_BAD_REQUEST,
                 message: b"Invalid route control request",
-                triggered_by: Some(&self.ilp_address.read()),
+                triggered_by: Some(&context.ilp_address),
                 data: &[],
             }
             .build()));
@@ -293,9 +289,9 @@ where
 
             #[cfg(test)]
             {
-                let ilp_address = self.ilp_address.read().clone();
+                let ilp_address = &context.ilp_address.clone();
                 return Either::B(Either::A(
-                    self.send_route_update(request.from.clone(), from_epoch_index, to_epoch_index)
+                    self.send_route_update(request.from.clone(), from_epoch_index, to_epoch_index, context)
                         .map_err(move |_| {
                             RejectBuilder {
                                 code: ErrorCode::T01_PEER_UNREACHABLE,
@@ -315,6 +311,7 @@ where
                     request.from.clone(),
                     from_epoch_index,
                     to_epoch_index,
+                    context,
                 ));
             }
         }
@@ -331,13 +328,13 @@ where
     }
 
     /// Remove invalid routes before processing the Route Update Request
-    fn filter_routes(&self, mut update: RouteUpdateRequest) -> RouteUpdateRequest {
+    fn filter_routes(&self, mut update: RouteUpdateRequest, context: RequestContext) -> RouteUpdateRequest {
         update.new_routes = update
             .new_routes
             .into_iter()
             .filter(|route| {
-                let ilp_address = self.ilp_address.read();
-                let address_scheme = (*ilp_address).scheme();
+                let ilp_address = context.ilp_address.clone();
+                let address_scheme = ilp_address.scheme();
                 if !route.prefix.starts_with(address_scheme) {
                     warn!("Got route for a different global prefix: {:?}", route);
                     false
@@ -366,13 +363,13 @@ where
     /// If updates are applied to the Incoming Routing Table for this peer, we will
     /// then check whether those routes are better than the current best ones we have in the
     /// Local Routing Table.
-    fn handle_route_update_request(&self, request: IncomingRequest<A>) -> BoxedIlpFuture {
+    fn handle_route_update_request(&self, request: IncomingRequest<A>, context: RequestContext) -> BoxedIlpFuture {
         // Ignore the request if we don't accept routes from them
         if !request.from.should_receive_routes() {
             return Box::new(err(RejectBuilder {
                 code: ErrorCode::F00_BAD_REQUEST,
                 message: b"Your route broadcasts are not accepted here",
-                triggered_by: Some(&self.ilp_address.read()),
+                triggered_by: Some(&context.ilp_address),
                 data: &[],
             }
             .build()));
@@ -383,7 +380,7 @@ where
             return Box::new(err(RejectBuilder {
                 code: ErrorCode::F00_BAD_REQUEST,
                 message: b"Invalid route update request",
-                triggered_by: Some(&self.ilp_address.read()),
+                triggered_by: Some(&context.ilp_address),
                 data: &[],
             }
             .build()));
@@ -396,7 +393,7 @@ where
         );
 
         // Filter out routes that don't make sense or that we won't accept
-        let update = self.filter_routes(update);
+        let update = self.filter_routes(update, context.clone());
 
         let mut incoming_tables = self.incoming_tables.write();
         if !&incoming_tables.contains_key(&request.from.id()) {
@@ -429,7 +426,7 @@ where
                         .into_iter()
                         .map(|s| s.to_string())
                         .collect(),
-                ));
+                ), context);
 
                 #[cfg(not(test))]
                 {
@@ -439,7 +436,7 @@ where
 
                 #[cfg(test)]
                 {
-                    let ilp_address = self.ilp_address.clone();
+                    let ilp_address = context.ilp_address.clone();
                     Box::new(
                         future
                             .map_err(move |_| {
@@ -461,7 +458,7 @@ where
                     code: ErrorCode::F00_BAD_REQUEST,
                     message: &message.as_bytes(),
                     data: &[],
-                    triggered_by: Some(&self.ilp_address.read()),
+                    triggered_by: Some(&context.ilp_address),
                 }
                 .build();
                 let table = &incoming_tables[&request.from.id()];
@@ -487,7 +484,7 @@ where
         &self,
         account: A,
         last_known_routing_table_id: [u8; 16],
-        last_known_epoch: u32,
+        last_known_epoch: u32
     ) -> impl Future<Item = (), Error = ()> {
         let account_id = account.id();
         let control = RouteControlRequest {
@@ -502,26 +499,34 @@ where
             hex::encode(&last_known_routing_table_id[..]),
             last_known_epoch);
         let prepare = control.to_prepare();
-        self.clone()
-            .outgoing
-            .send_request(OutgoingRequest {
-                // TODO If we start charging or paying for CCP broadcasts we'll need to
-                // have a separate account that we send from, but for now it's fine to
-                // set the peer's account as the from account as well as the to account
-                from: account.clone(),
-                to: account,
-                original_amount: prepare.amount(),
-                prepare,
-            })
-            .then(move |result| {
-                if let Err(err) = result {
-                    warn!(
-                        "Error sending Route Control Request to account {}: {:?}",
-                        account_id, err
-                    )
-                }
-                Ok(())
-            })
+        let mut clone = self.clone();
+        self.store.get_ilp_address_lock().read()
+            .and_then(move |ilp_address_guard|{
+                let address = ilp_address_guard.clone();
+                let context = RequestContext::new(address);
+                clone
+                    .outgoing
+                    .send_request(OutgoingRequest {
+                        // TODO If we start charging or paying for CCP broadcasts we'll need to
+                        // have a separate account that we send from, but for now it's fine to
+                        // set the peer's account as the from account as well as the to account
+                        from: account.clone(),
+                        to: account,
+                        original_amount: prepare.amount(),
+                        prepare,
+                    }, context)
+                    .then(move |result| {
+                        // When the request is done, the ILP address is released.
+                        drop(ilp_address_guard);
+                        if let Err(err) = result {
+                            warn!(
+                                "Error sending Route Control Request to account {}: {:?}",
+                                account_id, err
+                            )
+                        }
+                        Ok(())
+                    })
+        })
     }
 
     /// Check whether the Local Routing Table currently has the best routes for the
@@ -532,12 +537,12 @@ where
     fn update_best_routes(
         &self,
         prefixes: Option<Vec<String>>,
+        context: RequestContext,
     ) -> impl Future<Item = (), Error = ()> + 'static {
         let local_table = self.local_table.clone();
         let forwarding_table = self.forwarding_table.clone();
         let forwarding_table_updates = self.forwarding_table_updates.clone();
         let incoming_tables = self.incoming_tables.clone();
-        let ilp_address = self.ilp_address.read().clone();
         let mut store = self.store.clone();
 
         self.store.get_local_and_configured_routes().and_then(
@@ -613,16 +618,16 @@ where
 
                         // Don't advertise routes that don't start with the global prefix
                         // or that advertise the whole global prefix
-                        let address_scheme = ilp_address.scheme();
+                        let address_scheme = context.ilp_address.scheme();
                         let correct_address_scheme = route.prefix.starts_with(address_scheme)
                             && route.prefix != address_scheme;
                         // We do want to advertise our address
-                        let is_our_address = route.prefix == &ilp_address as &str;
+                        let is_our_address = route.prefix == &context.ilp_address as &str;
                         // Don't advertise local routes because advertising only our address
                         // will be enough to ensure the packet gets to us and we can route it
                         // to the correct account on our node
                         let is_local_route =
-                            route.prefix.starts_with(&ilp_address as &str) && route.path.is_empty();
+                            route.prefix.starts_with(&context.ilp_address as &str) && route.path.is_empty();
                         let not_local_route = is_our_address || !is_local_route;
                         // Don't include routes we're also withdrawing
                         let not_withdrawn_route = !withdrawn_routes.contains(&prefix);
@@ -630,7 +635,7 @@ where
                         if correct_address_scheme && not_local_route && not_withdrawn_route {
                             let old_route = forwarding_table.get_route(prefix);
                             if old_route.is_none() || old_route.unwrap().0.id() != account.id() {
-                                route.path.insert(0, ilp_address.to_string());
+                                route.path.insert(0, context.ilp_address.to_string());
                                 // Each hop hashes the auth before forwarding
                                 route.auth = hash(&route.auth);
                                 forwarding_table.set_route(
@@ -662,7 +667,9 @@ where
                                 .get_simplified_table()
                                 .into_iter()
                                 .map(|(prefix, account)| (prefix.to_string(), account)),
-                        ),
+                        ).and_then(move|_|{
+                            Ok(())
+                        }),
                     )
                 } else {
                     // The routing table hasn't changed
@@ -673,7 +680,7 @@ where
     }
 
     /// Send RouteUpdateRequests to all peers that we send routing messages to
-    fn send_route_updates(&self) -> impl Future<Item = (), Error = ()> {
+    fn send_route_updates(&self, context: RequestContext) -> impl Future<Item = (), Error = ()> {
         let self_clone = self.clone();
         let unavailable_accounts = self.unavailable_accounts.clone();
         // Check which accounts we should skip this iteration
@@ -734,7 +741,7 @@ where
                                     to: account.clone(),
                                     original_amount: prepare.amount(),
                                     prepare: prepare.clone(),
-                                })
+                                }, context.clone())
                                 .then(move |res| Ok((account, res)))
                         }))
                         .and_then(move |results: Vec<(A, Result<Fulfill, Reject>)>| {
@@ -865,6 +872,7 @@ where
         account: A,
         from_epoch_index: u32,
         to_epoch_index: u32,
+        context: RequestContext,
     ) -> impl Future<Item = (), Error = ()> {
         let prepare = self
             .create_route_update(from_epoch_index, to_epoch_index)
@@ -881,7 +889,7 @@ where
                 to: account,
                 original_amount: prepare.amount(),
                 prepare,
-            })
+            }, context)
             .and_then(|_| Ok(()))
             .then(move |result| {
                 if let Err(err) = result {
@@ -980,14 +988,14 @@ where
 
     /// Handle the IncomingRequest if it is a CCP protocol message or
     /// pass it on to the next handler if not
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> Self::Future {
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
         let destination = request.prepare.destination();
         if destination == *CCP_CONTROL_DESTINATION {
-            Box::new(self.handle_route_control_request(request))
+            Box::new(self.handle_route_control_request(request, context))
         } else if destination == *CCP_UPDATE_DESTINATION {
-            Box::new(self.handle_route_update_request(request))
+            Box::new(self.handle_route_update_request(request, context))
         } else {
-            Box::new(self.next_incoming.handle_request(request))
+            Box::new(self.next_incoming.handle_request(request, context))
         }
     }
 }

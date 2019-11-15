@@ -9,7 +9,7 @@ use interledger_packet::{
     Address, ErrorCode, Fulfill, FulfillBuilder, PacketType as IlpPacketType, Prepare, Reject,
     RejectBuilder,
 };
-use interledger_service::{Account, BoxedIlpFuture, OutgoingRequest, OutgoingService, Username};
+use interledger_service::{Account, BoxedIlpFuture, OutgoingRequest, OutgoingService, Username, RequestContext};
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -146,7 +146,7 @@ where
 
     /// Try fulfilling the request if it is for this STREAM server or pass it to the next
     /// outgoing handler if not.
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> Self::Future {
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
         let to_username = request.to.username().clone();
         let from_username = request.from.username().clone();
         let amount = request.prepare.amount();
@@ -181,14 +181,14 @@ where
                             // the sender will likely see an error like F02: Unavailable (this is
                             // a bit confusing but the packet data should not be modified at all
                             // under normal circumstances).
-                            return Box::new(self.next.send_request(request));
+                            return Box::new(self.next.send_request(request, context));
                         }
                     }
                 };
                 return Box::new(result(response));
             }
         }
-        Box::new(self.next.send_request(request))
+        Box::new(self.next.send_request(request, context))
     }
 }
 

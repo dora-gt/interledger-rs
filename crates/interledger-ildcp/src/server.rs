@@ -34,7 +34,7 @@ where
 {
     type Future = BoxedIlpFuture;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> Self::Future {
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
         if is_ildcp_request(&request.prepare) {
             let from = request.from.ilp_address();
             let builder = IldcpResponseBuilder {
@@ -47,7 +47,7 @@ where
             let fulfill = Fulfill::from(response);
             Box::new(ok(fulfill))
         } else {
-            Box::new(self.next.handle_request(request))
+            Box::new(self.next.handle_request(request, context))
         }
     }
 }

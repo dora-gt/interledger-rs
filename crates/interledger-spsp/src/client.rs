@@ -1,7 +1,7 @@
 use super::{Error, SpspResponse};
 use futures::{future::result, Future};
 use interledger_packet::Address;
-use interledger_service::{Account, IncomingService};
+use interledger_service::{Account, IncomingService, RequestContext};
 use interledger_stream::{send_money, StreamDelivery};
 use log::{debug, error, trace};
 use reqwest::r#async::Client;
@@ -31,6 +31,7 @@ pub fn pay<S, A>(
     from_account: A,
     receiver: &str,
     source_amount: u64,
+    context: RequestContext,
 ) -> impl Future<Item = StreamDelivery, Error = Error>
 where
     S: IncomingService<A> + Clone,
@@ -46,7 +47,7 @@ where
         .and_then(move |addr| {
             debug!("Sending SPSP payment to address: {}", addr);
 
-            send_money(service, &from_account, addr, &shared_secret, source_amount)
+            send_money(service, &from_account, addr, &shared_secret, source_amount, context)
                 .map(move |(receipt, _plugin)| {
                     debug!("Sent SPSP payment. StreamDelivery: {:?}", receipt);
                     receipt

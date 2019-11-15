@@ -27,6 +27,7 @@
 //! HttpServerService --> ValidatorService --> StreamReceiverService
 
 use futures::{Future, IntoFuture};
+use futures_locks::{RwLock, RwLockReadGuard};
 use interledger_packet::{Address, Fulfill, Prepare, Reject};
 use std::{
     cmp::Eq,
@@ -66,7 +67,7 @@ pub trait Account: Clone + Send + Sized + Debug {
 #[derive(Clone)]
 pub struct IncomingRequest<A: Account> {
     pub from: A,
-    pub prepare: Prepare,
+    pub prepare: Prepare
 }
 
 // Use a custom debug implementation to specify the order of the fields
@@ -127,7 +128,7 @@ where
 pub trait IncomingService<A: Account> {
     type Future: Future<Item = Fulfill, Error = Reject> + Send + 'static;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> Self::Future;
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future;
 
     /// Wrap the given service such that the provided function will
     /// be called to handle each request. That function can
@@ -135,7 +136,7 @@ pub trait IncomingService<A: Account> {
     /// and/or handle the result of calling the inner service.
     fn wrap<F, R>(self, f: F) -> WrappedService<F, Self, A>
     where
-        F: Fn(IncomingRequest<A>, Self) -> R,
+        F: Fn(IncomingRequest<A>, RequestContext, Self) -> R,
         R: Future<Item = Fulfill, Error = Reject> + Send + 'static,
         Self: Clone + Sized,
     {
@@ -147,7 +148,7 @@ pub trait IncomingService<A: Account> {
 pub trait OutgoingService<A: Account> {
     type Future: Future<Item = Fulfill, Error = Reject> + Send + 'static;
 
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> Self::Future;
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future;
 
     /// Wrap the given service such that the provided function will
     /// be called to handle each request. That function can
@@ -155,7 +156,7 @@ pub trait OutgoingService<A: Account> {
     /// and/or handle the result of calling the inner service.
     fn wrap<F, R>(self, f: F) -> WrappedService<F, Self, A>
     where
-        F: Fn(OutgoingRequest<A>, Self) -> R,
+        F: Fn(OutgoingRequest<A>, RequestContext, Self) -> R,
         R: Future<Item = Fulfill, Error = Reject> + Send + 'static,
         Self: Clone + Sized,
     {
@@ -222,12 +223,12 @@ where
     A: Account,
     B: IntoFuture<Item = Fulfill, Error = Reject>,
     <B as futures::future::IntoFuture>::Future: std::marker::Send + 'static,
-    F: FnMut(IncomingRequest<A>) -> B,
+    F: FnMut(IncomingRequest<A>, RequestContext) -> B,
 {
     type Future = BoxedIlpFuture;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> Self::Future {
-        Box::new((self.handler)(request).into_future())
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
+        Box::new((self.handler)(request, context).into_future())
     }
 }
 
@@ -236,12 +237,12 @@ where
     A: Account,
     B: IntoFuture<Item = Fulfill, Error = Reject>,
     <B as futures::future::IntoFuture>::Future: std::marker::Send + 'static,
-    F: FnMut(OutgoingRequest<A>) -> B,
+    F: FnMut(OutgoingRequest<A>, RequestContext) -> B,
 {
     type Future = BoxedIlpFuture;
 
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> Self::Future {
-        Box::new((self.handler)(request).into_future())
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+        Box::new((self.handler)(request, context).into_future())
     }
 }
 
@@ -260,7 +261,7 @@ pub struct WrappedService<F, I, A> {
 
 impl<F, IO, A, R> WrappedService<F, IO, A>
 where
-    F: Fn(IncomingRequest<A>, IO) -> R,
+    F: Fn(IncomingRequest<A>, RequestContext, IO) -> R,
     IO: IncomingService<A> + Clone,
     A: Account,
     R: Future<Item = Fulfill, Error = Reject> + Send + 'static,
@@ -280,21 +281,21 @@ where
 
 impl<F, IO, A, R> IncomingService<A> for WrappedService<F, IO, A>
 where
-    F: Fn(IncomingRequest<A>, IO) -> R,
+    F: Fn(IncomingRequest<A>, RequestContext, IO) -> R,
     IO: IncomingService<A> + Clone,
     A: Account,
     R: Future<Item = Fulfill, Error = Reject> + Send + 'static,
 {
     type Future = R;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>) -> R {
-        (self.f)(request, (*self.inner).clone())
+    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> R {
+        (self.f)(request, context, (*self.inner).clone())
     }
 }
 
 impl<F, IO, A, R> WrappedService<F, IO, A>
 where
-    F: Fn(OutgoingRequest<A>, IO) -> R,
+    F: Fn(OutgoingRequest<A>, RequestContext, IO) -> R,
     IO: OutgoingService<A> + Clone,
     A: Account,
     R: Future<Item = Fulfill, Error = Reject> + Send + 'static,
@@ -314,15 +315,15 @@ where
 
 impl<F, IO, A, R> OutgoingService<A> for WrappedService<F, IO, A>
 where
-    F: Fn(OutgoingRequest<A>, IO) -> R,
+    F: Fn(OutgoingRequest<A>, RequestContext, IO) -> R,
     IO: OutgoingService<A> + Clone,
     A: Account,
     R: Future<Item = Fulfill, Error = Reject> + Send + 'static,
 {
     type Future = R;
 
-    fn send_request(&mut self, request: OutgoingRequest<A>) -> R {
-        (self.f)(request, (*self.inner).clone())
+    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> R {
+        (self.f)(request, context, (*self.inner).clone())
     }
 }
 
@@ -337,4 +338,22 @@ pub trait AddressStore: Clone {
 
     /// Get's the store's ilp address from memory
     fn get_ilp_address(&self) -> Address;
+
+    /// Gets the lock of ILP address
+    fn get_ilp_address_lock(&self) -> RwLock<Address>;
+}
+
+/// The context that the request is based on.
+#[derive(Clone)]
+pub struct RequestContext {
+    // The ILP address of the node
+    pub ilp_address: Address,
+}
+
+impl RequestContext {
+    pub fn new(ilp_address: Address) -> Self {
+        RequestContext {
+            ilp_address
+        }
+    }
 }

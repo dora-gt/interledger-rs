@@ -5,20 +5,22 @@ use log::{debug, error};
 use std::convert::TryFrom;
 
 /// Get the ILP address and asset details for a given account.
-pub fn get_ildcp_info<S, A>(
-    service: &mut S,
+pub fn get_ildcp_info<I, A, S>(
+    service: &mut I,
     account: A,
+    context: RequestContext,
 ) -> impl Future<Item = IldcpResponse, Error = ()>
 where
-    S: IncomingService<A>,
+    I: IncomingService<A>,
     A: Account,
 {
     let prepare = IldcpRequest {}.to_prepare();
+
     service
         .handle_request(IncomingRequest {
             from: account,
-            prepare,
-        })
+            prepare
+        }, context)
         .map_err(|err| error!("Error getting ILDCP info: {:?}", err))
         .and_then(|fulfill| {
             let response =
