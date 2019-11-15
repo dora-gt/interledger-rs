@@ -4,11 +4,12 @@ use futures::{
     future::{err, Either, FutureResult},
     Future,
 };
-use interledger_packet::Prepare;
-use interledger_service::{AuthToken, IncomingRequest, IncomingService};
+use interledger_packet::{Prepare, Address};
+use interledger_service::{AuthToken, IncomingRequest, IncomingService, AddressStore, RequestContext};
 use log::error;
 use std::{convert::TryFrom, net::SocketAddr};
 use warp::{self, Filter, Rejection};
+use futures_locks::RwLockReadGuard;
 
 /// Max message size that is allowed to transfer from a request or a message.
 pub const MAX_PACKET_SIZE: u64 = 40000;
@@ -24,7 +25,7 @@ pub struct HttpServer<I, S> {
 impl<I, S> HttpServer<I, S>
 where
     I: IncomingService<S::Account> + Clone + Send + Sync + 'static,
-    S: HttpStore,
+    S: HttpStore + AddressStore,
 {
     pub fn new(incoming: I, store: S) -> Self {
         HttpServer { incoming, store }
@@ -36,6 +37,16 @@ where
     {
         let incoming = self.incoming.clone();
         let store = self.store.clone();
+        let with_ilp_address_store = self.store.clone();
+
+        let with_ilp_address_lock =  warp::any()
+            .and_then(move || {
+                with_ilp_address_store.get_ilp_address_lock().read()
+                    .map_err(|_| -> Rejection {
+                        ApiError::internal_server_error().into()
+                    })
+                })
+            .boxed();
 
         warp::post2()
             .and(warp::path("ilp"))
@@ -54,12 +65,16 @@ where
             })
             .and(warp::body::content_length_limit(MAX_PACKET_SIZE))
             .and(warp::body::concat())
+            .and(with_ilp_address_lock.clone())
             .and_then(
                 move |account: S::Account,
-                      body: warp::body::FullBody|
+                      body: warp::body::FullBody,
+                      ilp_address_lock: RwLockReadGuard<Address>|
                       -> Either<_, FutureResult<_, Rejection>> {
                     // TODO don't copy ILP packet
                     let buffer = BytesMut::from(body.bytes());
+                    let ilp_address = ilp_address_lock.clone();
+                    let context = RequestContext::new(ilp_address);
                     if let Ok(prepare) = Prepare::try_from(buffer) {
                         Either::A(
                             incoming
@@ -67,8 +82,9 @@ where
                                 .handle_request(IncomingRequest {
                                     from: account,
                                     prepare,
-                                })
-                                .then(|result| {
+                                }, context)
+                                .then(move|result| {
+                                    drop(ilp_address_lock);
                                     let bytes: BytesMut = match result {
                                         Ok(fulfill) => fulfill.into(),
                                         Err(reject) => reject.into(),
@@ -81,6 +97,7 @@ where
                                 }),
                         )
                     } else {
+                        drop(ilp_address_lock);
                         error!("Body was not a valid Prepare packet");
                         Either::B(err(ApiError::invalid_ilp_packet().into()))
                     }

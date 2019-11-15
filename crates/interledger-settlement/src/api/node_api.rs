@@ -13,10 +13,11 @@ use futures::{
     future::{err, result},
     Future,
 };
+use futures_locks::RwLockReadGuard;
 use hyper::{Response, StatusCode};
 use interledger_http::error::*;
-use interledger_packet::PrepareBuilder;
-use interledger_service::{Account, AccountStore, OutgoingRequest, OutgoingService};
+use interledger_packet::{PrepareBuilder, Address};
+use interledger_service::{Account, AccountStore, OutgoingRequest, OutgoingService, AddressStore, RequestContext};
 use log::error;
 use num_bigint::BigUint;
 use num_traits::cast::ToPrimitive;
@@ -40,6 +41,7 @@ where
         + SettlementStore<Account = A>
         + IdempotentStore
         + AccountStore<Account = A>
+        + AddressStore
         + Clone
         + Send
         + Sync
@@ -47,9 +49,20 @@ where
     O: OutgoingService<A> + Clone + Send + Sync + 'static,
     A: SettlementAccount + Account + Send + Sync + 'static,
 {
-    let with_store = warp::any().map(move || store.clone()).boxed();
+    let store_clone = store.clone();
+    let with_store = warp::any().map(move || store_clone.clone()).boxed();
     let idempotency = warp::header::optional::<String>("idempotency-key");
     let account_id_filter = warp::path("accounts").and(warp::path::param2::<String>()); // account_id
+    let with_ilp_address_store = store.clone();
+
+    let with_ilp_address_lock =  warp::any()
+        .and_then(move || {
+            with_ilp_address_store.get_ilp_address_lock().read()
+                .map_err(|_| -> Rejection {
+                    ApiError::internal_server_error().into()
+                })
+        })
+        .boxed();
 
     // POST /accounts/:account_id/settlements (optional idempotency-key header)
     // Body is a Quantity object
@@ -60,11 +73,13 @@ where
         .and(idempotency)
         .and(warp::body::json())
         .and(with_store.clone())
+        .and(with_ilp_address_lock.clone())
         .and_then(
             move |account_id: String,
                   idempotency_key: Option<String>,
                   quantity: Quantity,
-                  store: S| {
+                  store: S,
+                  ilp_address_lock: RwLockReadGuard<Address>| {
                 let input = format!("{}{:?}", account_id, quantity);
                 let input_hash = get_hash_of(input.as_ref());
 
@@ -88,6 +103,10 @@ where
                         .body(message)
                         .unwrap())
                 })
+                .then(move|result|{
+                    drop(ilp_address_lock);
+                    result
+                })
             },
         );
 
@@ -102,23 +121,27 @@ where
         .and(warp::body::concat())
         .and(with_store.clone())
         .and(with_outgoing_handler.clone())
+        .and(with_ilp_address_lock.clone())
         .and_then(
             move |account_id: String,
                   idempotency_key: Option<String>,
                   body: warp::body::FullBody,
                   store: S,
-                  outgoing_handler: O| {
+                  outgoing_handler: O,
+                  ilp_address_lock: RwLockReadGuard<Address>| {
                 // Gets called by our settlement engine, forwards the request outwards
                 // until it reaches the peer's settlement engine.
                 let message = Vec::from_buf(body);
                 let input = format!("{}{:?}", account_id, message);
                 let input_hash = get_hash_of(input.as_ref());
+                let ilp_address = ilp_address_lock.clone();
+                let context = RequestContext::new(ilp_address);
 
                 let store_clone = store.clone();
                 // Wrap do_send_outgoing_message in a closure to be invoked by
                 // the idempotency wrapper
                 let send_outgoing_message_fn = move || {
-                    do_send_outgoing_message(store_clone, outgoing_handler, account_id, message)
+                    do_send_outgoing_message(store_clone, outgoing_handler, account_id, message, context)
                 };
                 make_idempotent_call(
                     store,
@@ -134,6 +157,10 @@ where
                         .status(status_code)
                         .body(message)
                         .unwrap())
+                })
+                .then(move|result|{
+                    drop(ilp_address_lock);
+                    result
                 })
             },
         );
@@ -262,6 +289,7 @@ fn do_send_outgoing_message<S, O, A>(
     mut outgoing_handler: O,
     account_id: String,
     body: Vec<u8>,
+    context: RequestContext,
 ) -> Box<dyn Future<Item = ApiResponse, Error = ApiError> + Send>
 where
     S: LeftoversStore<AccountId = <A as Account>::AccountId, AssetType = BigUint>
@@ -317,7 +345,7 @@ where
                         data: &body,
                         execution_condition: &PEER_PROTOCOL_CONDITION,
                     }.build()
-                })
+                }, context)
                 .map_err(move |reject| {
                     let error_msg = format!("Error sending message to peer settlement engine. Packet rejected with code: {}, message: {}", reject.code(), str::from_utf8(reject.message()).unwrap_or_default());
                     let error_type = ApiErrorType {
