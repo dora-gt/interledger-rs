@@ -276,7 +276,7 @@ impl InterledgerNode {
                 .map_err(|_| error!(target: "interledger-node", "Error getting accounts"))
                 .and_then(move |btp_accounts| {
                     let outgoing_service =
-                        outgoing_service_fn(move |request: OutgoingRequest<Account>, context: RequestContext| {
+                        outgoing_service_fn(move |request: OutgoingRequest<Account>, _context: RequestContext| {
                             // Don't log anything for failed route updates sent to child accounts
                             // because there's a good chance they'll be offline
                             if request.prepare.destination().scheme() != "peer"
@@ -531,7 +531,6 @@ impl InterledgerNode {
             .and_then(move |redis_url| RedisStoreBuilder::new(redis_url, redis_secret).connect())
             .map_err(|err| error!(target: "interledger-node", "Error connecting to Redis: {:?}", err))
             .and_then(move |store| {
-                let store_clone = store.clone();
                 store.get_ilp_address_lock().read().and_then(move|ilp_address_guard|{
                     store
                         .insert_account(account, ilp_address_guard.clone())

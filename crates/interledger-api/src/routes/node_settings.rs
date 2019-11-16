@@ -72,17 +72,14 @@ where
     // GET /
     let get_root = warp::get2()
         .and(warp::path::end())
-        .and(with_store.clone())
         .and(with_ilp_address_lock.clone())
-        .map(
-            move |store: S, ilp_address_guard: RwLockReadGuard<Address>| {
-                warp::reply::json(&StatusResponse {
-                    status: "Ready".to_string(),
-                    ilp_address: ilp_address_guard.clone(),
-                    version: node_version.clone(),
-                })
-            },
-        )
+        .map(move |ilp_address_guard: RwLockReadGuard<Address>| {
+            warp::reply::json(&StatusResponse {
+                status: "Ready".to_string(),
+                ilp_address: ilp_address_guard.clone(),
+                version: node_version.clone(),
+            })
+        })
         .boxed();
 
     // PUT /rates

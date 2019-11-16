@@ -13,8 +13,8 @@ use interledger_ildcp::IldcpResponse;
 use interledger_packet::Address;
 use interledger_router::RouterStore;
 use interledger_service::{
-    Account, AccountStore, AddressStore, AuthToken, IncomingService, OutgoingRequest,
-    OutgoingService, RequestContext, Username,
+    Account, AddressStore, AuthToken, IncomingService, OutgoingRequest, OutgoingService,
+    RequestContext, Username,
 };
 use interledger_service_util::{BalanceStore, ExchangeRateStore};
 use interledger_settlement::core::types::SettlementAccount;
@@ -622,7 +622,7 @@ where
                 Ok(ilp_address_guard)
             })
         })
-        .and_then(move |ilp_address_guard| Ok((ilp_address_guard)))
+        .and_then(move |ilp_address_guard| Ok(ilp_address_guard))
 }
 
 // Helper function which gets called whenever a new account is added or
