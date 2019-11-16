@@ -2,7 +2,9 @@ use futures::Future;
 use interledger::{
     ccp::{CcpRoutingAccount, RoutingRelation},
     packet::{ErrorCode, Fulfill, Reject},
-    service::{Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService, RequestContext},
+    service::{
+        Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService, RequestContext,
+    },
 };
 use std::str;
 use tracing::{debug_span, error_span, info, info_span};

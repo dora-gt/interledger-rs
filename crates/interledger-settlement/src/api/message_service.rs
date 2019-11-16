@@ -4,7 +4,9 @@ use futures::{
     Future, Stream,
 };
 use interledger_packet::{ErrorCode, FulfillBuilder, RejectBuilder};
-use interledger_service::{Account, BoxedIlpFuture, IncomingRequest, IncomingService, RequestContext};
+use interledger_service::{
+    Account, BoxedIlpFuture, IncomingRequest, IncomingService, RequestContext,
+};
 use log::error;
 use reqwest::r#async::Client;
 use std::marker::PhantomData;
@@ -40,7 +42,11 @@ where
 {
     type Future = BoxedIlpFuture;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
+    fn handle_request(
+        &mut self,
+        request: IncomingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         // Only handle the request if the destination address matches the ILP address
         // of the settlement engine being used for this account
         if let Some(settlement_engine_details) = request.from.settlement_engine_details() {

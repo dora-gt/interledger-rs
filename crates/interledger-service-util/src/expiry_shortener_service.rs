@@ -51,7 +51,11 @@ where
     /// 2. Reduce the packet's expiry by that amount
     /// 3. Ensure that the packet expiry does not exceed the maximum expiry duration
     /// 4. Forward the request
-    fn send_request(&mut self, mut request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+    fn send_request(
+        &mut self,
+        mut request: OutgoingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         let time_to_subtract =
             i64::from(request.from.round_trip_time() + request.to.round_trip_time());
         let new_expiry = DateTime::<Utc>::from(request.prepare.expires_at())

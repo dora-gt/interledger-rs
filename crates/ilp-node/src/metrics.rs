@@ -2,7 +2,9 @@ use futures::Future;
 use interledger::{
     ccp::CcpRoutingAccount,
     packet::{Fulfill, Reject},
-    service::{Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService, RequestContext},
+    service::{
+        Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService, RequestContext,
+    },
 };
 use metrics::{self, labels, recorder, Key};
 use std::time::Instant;

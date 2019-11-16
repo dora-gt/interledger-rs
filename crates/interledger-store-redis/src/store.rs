@@ -1343,20 +1343,23 @@ impl AddressStore for RedisStore {
     fn clear_ilp_address(&self) -> Box<dyn Future<Item = (), Error = ()> + Send> {
         let self_clone = self.clone();
         Box::new(
-        self.get_ilp_address_lock().write()
-            .and_then(move|mut ilp_address_guard|{
-            cmd("DEL")
-                .arg(PARENT_ILP_KEY)
-                .query_async(self_clone.connection.clone())
-                .map_err(|err| error!("Error removing parent address: {:?}", err))
-                .and_then(move |(_, _): (RedisReconnect, Value)| {
-                    *ilp_address_guard = DEFAULT_ILP_ADDRESS.clone();
-                    Ok(ilp_address_guard)
+            self.get_ilp_address_lock()
+                .write()
+                .and_then(move |mut ilp_address_guard| {
+                    cmd("DEL")
+                        .arg(PARENT_ILP_KEY)
+                        .query_async(self_clone.connection.clone())
+                        .map_err(|err| error!("Error removing parent address: {:?}", err))
+                        .and_then(move |(_, _): (RedisReconnect, Value)| {
+                            *ilp_address_guard = DEFAULT_ILP_ADDRESS.clone();
+                            Ok(ilp_address_guard)
+                        })
                 })
-        }).and_then(|ilp_address_guard|{
-            drop(ilp_address_guard);
-            Ok(())
-        }))
+                .and_then(|ilp_address_guard| {
+                    drop(ilp_address_guard);
+                    Ok(())
+                }),
+        )
     }
 
     fn get_ilp_address_lock(&self) -> RwLockAsync<Address> {

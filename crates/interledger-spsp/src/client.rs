@@ -47,15 +47,22 @@ where
         .and_then(move |addr| {
             debug!("Sending SPSP payment to address: {}", addr);
 
-            send_money(service, &from_account, addr, &shared_secret, source_amount, context)
-                .map(move |(receipt, _plugin)| {
-                    debug!("Sent SPSP payment. StreamDelivery: {:?}", receipt);
-                    receipt
-                })
-                .map_err(move |err| {
-                    error!("Error sending payment: {:?}", err);
-                    Error::SendMoneyError(source_amount)
-                })
+            send_money(
+                service,
+                &from_account,
+                addr,
+                &shared_secret,
+                source_amount,
+                context,
+            )
+            .map(move |(receipt, _plugin)| {
+                debug!("Sent SPSP payment. StreamDelivery: {:?}", receipt);
+                receipt
+            })
+            .map_err(move |err| {
+                error!("Error sending payment: {:?}", err);
+                Error::SendMoneyError(source_amount)
+            })
         })
     })
 }

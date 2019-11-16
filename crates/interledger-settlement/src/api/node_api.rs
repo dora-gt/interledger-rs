@@ -16,8 +16,10 @@ use futures::{
 use futures_locks::RwLockReadGuard;
 use hyper::{Response, StatusCode};
 use interledger_http::error::*;
-use interledger_packet::{PrepareBuilder, Address};
-use interledger_service::{Account, AccountStore, OutgoingRequest, OutgoingService, AddressStore, RequestContext};
+use interledger_packet::{Address, PrepareBuilder};
+use interledger_service::{
+    Account, AccountStore, AddressStore, OutgoingRequest, OutgoingService, RequestContext,
+};
 use log::error;
 use num_bigint::BigUint;
 use num_traits::cast::ToPrimitive;
@@ -55,12 +57,12 @@ where
     let account_id_filter = warp::path("accounts").and(warp::path::param2::<String>()); // account_id
     let with_ilp_address_store = store.clone();
 
-    let with_ilp_address_lock =  warp::any()
+    let with_ilp_address_lock = warp::any()
         .and_then(move || {
-            with_ilp_address_store.get_ilp_address_lock().read()
-                .map_err(|_| -> Rejection {
-                    ApiError::internal_server_error().into()
-                })
+            with_ilp_address_store
+                .get_ilp_address_lock()
+                .read()
+                .map_err(|_| -> Rejection { ApiError::internal_server_error().into() })
         })
         .boxed();
 
@@ -103,7 +105,7 @@ where
                         .body(message)
                         .unwrap())
                 })
-                .then(move|result|{
+                .then(move |result| {
                     drop(ilp_address_lock);
                     result
                 })
@@ -141,7 +143,13 @@ where
                 // Wrap do_send_outgoing_message in a closure to be invoked by
                 // the idempotency wrapper
                 let send_outgoing_message_fn = move || {
-                    do_send_outgoing_message(store_clone, outgoing_handler, account_id, message, context)
+                    do_send_outgoing_message(
+                        store_clone,
+                        outgoing_handler,
+                        account_id,
+                        message,
+                        context,
+                    )
                 };
                 make_idempotent_call(
                     store,
@@ -158,7 +166,7 @@ where
                         .body(message)
                         .unwrap())
                 })
-                .then(move|result|{
+                .then(move |result| {
                     drop(ilp_address_lock);
                     result
                 })

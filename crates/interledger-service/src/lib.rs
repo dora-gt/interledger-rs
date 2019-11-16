@@ -67,7 +67,7 @@ pub trait Account: Clone + Send + Sized + Debug {
 #[derive(Clone)]
 pub struct IncomingRequest<A: Account> {
     pub from: A,
-    pub prepare: Prepare
+    pub prepare: Prepare,
 }
 
 // Use a custom debug implementation to specify the order of the fields
@@ -128,7 +128,11 @@ where
 pub trait IncomingService<A: Account> {
     type Future: Future<Item = Fulfill, Error = Reject> + Send + 'static;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future;
+    fn handle_request(
+        &mut self,
+        request: IncomingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future;
 
     /// Wrap the given service such that the provided function will
     /// be called to handle each request. That function can
@@ -148,7 +152,11 @@ pub trait IncomingService<A: Account> {
 pub trait OutgoingService<A: Account> {
     type Future: Future<Item = Fulfill, Error = Reject> + Send + 'static;
 
-    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future;
+    fn send_request(
+        &mut self,
+        request: OutgoingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future;
 
     /// Wrap the given service such that the provided function will
     /// be called to handle each request. That function can
@@ -227,7 +235,11 @@ where
 {
     type Future = BoxedIlpFuture;
 
-    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
+    fn handle_request(
+        &mut self,
+        request: IncomingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         Box::new((self.handler)(request, context).into_future())
     }
 }
@@ -241,7 +253,11 @@ where
 {
     type Future = BoxedIlpFuture;
 
-    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+    fn send_request(
+        &mut self,
+        request: OutgoingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         Box::new((self.handler)(request, context).into_future())
     }
 }
@@ -349,8 +365,6 @@ pub struct RequestContext {
 
 impl RequestContext {
     pub fn new(ilp_address: Address) -> Self {
-        RequestContext {
-            ilp_address
-        }
+        RequestContext { ilp_address }
     }
 }

@@ -61,7 +61,11 @@ where
 
     /// On receiving a request:
     /// 1. If the prepare packet in the request is not expired, forward it, otherwise return a reject
-    fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
+    fn handle_request(
+        &mut self,
+        request: IncomingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         let expires_at = DateTime::<Utc>::from(request.prepare.expires_at());
         let now = Utc::now();
         if expires_at >= now {
@@ -101,7 +105,11 @@ where
     ///     - If the forwarding is successful, it should receive a fulfill packet. Depending on if the hash of the fulfillment condition inside the fulfill is a preimage of the condition of the prepare:
     ///         - return the fulfill if it matches
     ///         - otherwise reject
-    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+    fn send_request(
+        &mut self,
+        request: OutgoingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         let mut condition: [u8; 32] = [0; 32];
         condition[..].copy_from_slice(request.prepare.execution_condition()); // why?
 

@@ -57,7 +57,11 @@ where
 {
     type Future = BoxedIlpFuture;
 
-    fn handle_request(&mut self, mut request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
+    fn handle_request(
+        &mut self,
+        mut request: IncomingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         let ilp_address = context.ilp_address.clone();
         let should_echo = request.prepare.destination() == ilp_address
             && request.prepare.data().starts_with(ECHO_PREFIX.as_bytes());

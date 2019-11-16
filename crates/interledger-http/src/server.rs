@@ -4,12 +4,14 @@ use futures::{
     future::{err, Either, FutureResult},
     Future,
 };
-use interledger_packet::{Prepare, Address};
-use interledger_service::{AuthToken, IncomingRequest, IncomingService, AddressStore, RequestContext};
+use futures_locks::RwLockReadGuard;
+use interledger_packet::{Address, Prepare};
+use interledger_service::{
+    AddressStore, AuthToken, IncomingRequest, IncomingService, RequestContext,
+};
 use log::error;
 use std::{convert::TryFrom, net::SocketAddr};
 use warp::{self, Filter, Rejection};
-use futures_locks::RwLockReadGuard;
 
 /// Max message size that is allowed to transfer from a request or a message.
 pub const MAX_PACKET_SIZE: u64 = 40000;
@@ -38,13 +40,14 @@ where
         let incoming = self.incoming.clone();
         let store = self.store.clone();
         let with_store = warp::any().map(move || store.clone()).boxed();
-        let with_ilp_address_lock =  with_store.clone()
+        let with_ilp_address_lock = with_store
+            .clone()
             .and_then(move |store: S| {
-                store.get_ilp_address_lock().read()
-                    .map_err(|_| -> Rejection {
-                        ApiError::internal_server_error().into()
-                    })
-                })
+                store
+                    .get_ilp_address_lock()
+                    .read()
+                    .map_err(|_| -> Rejection { ApiError::internal_server_error().into() })
+            })
             .boxed();
 
         warp::post2()
@@ -79,11 +82,14 @@ where
                         Either::A(
                             incoming
                                 .clone()
-                                .handle_request(IncomingRequest {
-                                    from: account,
-                                    prepare,
-                                }, context)
-                                .then(move|result| {
+                                .handle_request(
+                                    IncomingRequest {
+                                        from: account,
+                                        prepare,
+                                    },
+                                    context,
+                                )
+                                .then(move |result| {
                                     drop(ilp_address_guard);
                                     let bytes: BytesMut = match result {
                                         Ok(fulfill) => fulfill.into(),

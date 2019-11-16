@@ -309,7 +309,11 @@ where
     ///
     /// If there is no open connection for the Account specified in `request.to`, the
     /// request will be passed through to the `next` handler.
-    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+    fn send_request(
+        &mut self,
+        request: OutgoingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         let account_id = request.to.id();
         if let Some(connection) = (*self.connections.read()).get(&account_id) {
             let request_id = random::<u32>();
@@ -418,7 +422,11 @@ where
     ///
     /// If there is no open connection for the Account specified in `request.to`, the
     /// request will be passed through to the `next` handler.
-    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+    fn send_request(
+        &mut self,
+        request: OutgoingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         self.outgoing.send_request(request, context)
     }
 }

@@ -9,7 +9,9 @@ use interledger_packet::{
     Address, ErrorCode, Fulfill, FulfillBuilder, PacketType as IlpPacketType, Prepare, Reject,
     RejectBuilder,
 };
-use interledger_service::{Account, BoxedIlpFuture, OutgoingRequest, OutgoingService, Username, RequestContext};
+use interledger_service::{
+    Account, BoxedIlpFuture, OutgoingRequest, OutgoingService, RequestContext, Username,
+};
 use log::debug;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -146,7 +148,11 @@ where
 
     /// Try fulfilling the request if it is for this STREAM server or pass it to the next
     /// outgoing handler if not.
-    fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
+    fn send_request(
+        &mut self,
+        request: OutgoingRequest<A>,
+        context: RequestContext,
+    ) -> Self::Future {
         let to_username = request.to.username().clone();
         let from_username = request.from.username().clone();
         let amount = request.prepare.amount();

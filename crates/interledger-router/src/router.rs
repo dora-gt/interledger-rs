@@ -50,7 +50,11 @@ where
     /// Firstly, it checks if there is a direct path for that account and uses that.
     /// If not it scans through the routing table and checks if the route prefix matches
     /// the prepare packet's destination or if it's a catch-all address (i.e. empty prefix)
-    fn handle_request(&mut self, request: IncomingRequest<S::Account>, context: RequestContext) -> Self::Future {
+    fn handle_request(
+        &mut self,
+        request: IncomingRequest<S::Account>,
+        context: RequestContext,
+    ) -> Self::Future {
         let destination = request.prepare.destination();
         let mut next_hop = None;
         let routing_table = self.store.routing_table();

@@ -194,10 +194,13 @@ where
             // Send it!
             self.congestion_controller.prepare(amount);
             if let Some(ref mut next) = self.next {
-                let send_request = next.handle_request(IncomingRequest {
-                    from: self.from_account.clone(),
-                    prepare,
-                }, self.context.clone());
+                let send_request = next.handle_request(
+                    IncomingRequest {
+                        from: self.from_account.clone(),
+                        prepare,
+                    },
+                    self.context.clone(),
+                );
                 self.pending_requests.get_mut().push(PendingRequest {
                     sequence,
                     amount,
@@ -237,10 +240,13 @@ where
         // Send it!
         debug!("Closing connection");
         if let Some(ref mut next) = self.next {
-            let send_request = next.handle_request(IncomingRequest {
-                from: self.from_account.clone(),
-                prepare,
-            }, self.context.clone());
+            let send_request = next.handle_request(
+                IncomingRequest {
+                    from: self.from_account.clone(),
+                    prepare,
+                },
+                self.context.clone(),
+            );
             self.pending_requests.get_mut().push(PendingRequest {
                 sequence,
                 amount: 0,

@@ -17,10 +17,13 @@ where
     let prepare = IldcpRequest {}.to_prepare();
 
     service
-        .handle_request(IncomingRequest {
-            from: account,
-            prepare
-        }, context)
+        .handle_request(
+            IncomingRequest {
+                from: account,
+                prepare,
+            },
+            context,
+        )
         .map_err(|err| error!("Error getting ILDCP info: {:?}", err))
         .and_then(|fulfill| {
             let response =

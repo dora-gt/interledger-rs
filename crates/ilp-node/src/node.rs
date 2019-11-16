@@ -25,8 +25,8 @@ use interledger::{
     packet::{ErrorCode, RejectBuilder},
     router::Router,
     service::{
-        outgoing_service_fn, Account as AccountTrait, IncomingService, OutgoingRequest,
-        OutgoingService, Username, AddressStore, RequestContext
+        outgoing_service_fn, Account as AccountTrait, AddressStore, IncomingService,
+        OutgoingRequest, OutgoingService, RequestContext, Username,
     },
     service_util::{
         EchoService, ExchangeRateFetcher, ExchangeRateService, ExpiryShortenerService,
