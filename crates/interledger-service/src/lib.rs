@@ -190,7 +190,7 @@ pub fn incoming_service_fn<A, B, F>(handler: F) -> ServiceFn<F, A>
 where
     A: Account,
     B: IntoFuture<Item = Fulfill, Error = Reject>,
-    F: FnMut(IncomingRequest<A>) -> B,
+    F: FnMut(IncomingRequest<A>, RequestContext) -> B,
 {
     ServiceFn {
         handler,
@@ -203,7 +203,7 @@ pub fn outgoing_service_fn<A, B, F>(handler: F) -> ServiceFn<F, A>
 where
     A: Account,
     B: IntoFuture<Item = Fulfill, Error = Reject>,
-    F: FnMut(OutgoingRequest<A>) -> B,
+    F: FnMut(OutgoingRequest<A>, RequestContext) -> B,
 {
     ServiceFn {
         handler,
@@ -335,9 +335,6 @@ pub trait AddressStore: Clone {
     ) -> Box<dyn Future<Item = (), Error = ()> + Send>;
 
     fn clear_ilp_address(&self) -> Box<dyn Future<Item = (), Error = ()> + Send>;
-
-    /// Get's the store's ilp address from memory
-    fn get_ilp_address(&self) -> Address;
 
     /// Gets the lock of ILP address
     fn get_ilp_address_lock(&self) -> RwLock<Address>;

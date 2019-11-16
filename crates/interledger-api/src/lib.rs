@@ -76,6 +76,7 @@ pub trait NodeStore: AddressStore + Clone + Send + Sync + 'static {
     fn insert_account(
         &self,
         account: AccountDetails,
+        ilp_address: Address,
     ) -> Box<dyn Future<Item = Self::Account, Error = ()> + Send>;
 
     fn delete_account(
@@ -87,6 +88,7 @@ pub trait NodeStore: AddressStore + Clone + Send + Sync + 'static {
         &self,
         id: <Self::Account as Account>::AccountId,
         account: AccountDetails,
+        ilp_address: Address,
     ) -> Box<dyn Future<Item = Self::Account, Error = ()> + Send>;
 
     fn modify_account_settings(

@@ -2,13 +2,14 @@ use futures::Future;
 use interledger::{
     ccp::CcpRoutingAccount,
     packet::{Fulfill, Reject},
-    service::{Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService},
+    service::{Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService, RequestContext},
 };
 use metrics::{self, labels, recorder, Key};
 use std::time::Instant;
 
 pub fn incoming_metrics<A: Account + CcpRoutingAccount>(
     request: IncomingRequest<A>,
+    context: RequestContext,
     mut next: impl IncomingService<A>,
 ) -> impl Future<Item = Fulfill, Error = Reject> {
     let labels = labels!(
@@ -21,7 +22,7 @@ pub fn incoming_metrics<A: Account + CcpRoutingAccount>(
     );
     let start_time = Instant::now();
 
-    next.handle_request(request).then(move |result| {
+    next.handle_request(request, context).then(move |result| {
         if result.is_ok() {
             recorder().increment_counter(
                 Key::from_name_and_labels("requests.incoming.fulfill", labels.clone()),
@@ -43,6 +44,7 @@ pub fn incoming_metrics<A: Account + CcpRoutingAccount>(
 
 pub fn outgoing_metrics<A: Account + CcpRoutingAccount>(
     request: OutgoingRequest<A>,
+    context: RequestContext,
     mut next: impl OutgoingService<A>,
 ) -> impl Future<Item = Fulfill, Error = Reject> {
     let labels = labels!(
@@ -60,7 +62,7 @@ pub fn outgoing_metrics<A: Account + CcpRoutingAccount>(
     );
     let start_time = Instant::now();
 
-    next.send_request(request).then(move |result| {
+    next.send_request(request, context).then(move |result| {
         if result.is_ok() {
             recorder().increment_counter(
                 Key::from_name_and_labels("requests.outgoing.fulfill", labels.clone()),

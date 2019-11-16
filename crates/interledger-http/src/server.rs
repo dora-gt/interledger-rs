@@ -37,11 +37,10 @@ where
     {
         let incoming = self.incoming.clone();
         let store = self.store.clone();
-        let with_ilp_address_store = self.store.clone();
-
-        let with_ilp_address_lock =  warp::any()
-            .and_then(move || {
-                with_ilp_address_store.get_ilp_address_lock().read()
+        let with_store = warp::any().map(move || store.clone()).boxed();
+        let with_ilp_address_lock =  with_store.clone()
+            .and_then(move |store: S| {
+                store.get_ilp_address_lock().read()
                     .map_err(|_| -> Rejection {
                         ApiError::internal_server_error().into()
                     })
@@ -51,8 +50,9 @@ where
         warp::post2()
             .and(warp::path("ilp"))
             .and(warp::path::end())
+            .and(with_store.clone())
             .and(warp::header::<AuthToken>("authorization"))
-            .and_then(move |auth: AuthToken| {
+            .and_then(move |store: S, auth: AuthToken| {
                 store
                     .get_account_from_http_auth(auth.username(), auth.password())
                     .map_err(move |_| -> Rejection {
@@ -69,11 +69,11 @@ where
             .and_then(
                 move |account: S::Account,
                       body: warp::body::FullBody,
-                      ilp_address_lock: RwLockReadGuard<Address>|
+                      ilp_address_guard: RwLockReadGuard<Address>|
                       -> Either<_, FutureResult<_, Rejection>> {
                     // TODO don't copy ILP packet
                     let buffer = BytesMut::from(body.bytes());
-                    let ilp_address = ilp_address_lock.clone();
+                    let ilp_address = ilp_address_guard.clone();
                     let context = RequestContext::new(ilp_address);
                     if let Ok(prepare) = Prepare::try_from(buffer) {
                         Either::A(
@@ -84,7 +84,7 @@ where
                                     prepare,
                                 }, context)
                                 .then(move|result| {
-                                    drop(ilp_address_lock);
+                                    drop(ilp_address_guard);
                                     let bytes: BytesMut = match result {
                                         Ok(fulfill) => fulfill.into(),
                                         Err(reject) => reject.into(),
@@ -97,7 +97,7 @@ where
                                 }),
                         )
                     } else {
-                        drop(ilp_address_lock);
+                        drop(ilp_address_guard);
                         error!("Body was not a valid Prepare packet");
                         Either::B(err(ApiError::invalid_ilp_packet().into()))
                     }

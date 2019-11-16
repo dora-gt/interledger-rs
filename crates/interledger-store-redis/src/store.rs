@@ -64,6 +64,8 @@ use tokio_timer::Interval;
 use url::Url;
 use zeroize::Zeroize;
 
+type RwLockAsync<T> = futures_locks::RwLock<T>;
+
 const DEFAULT_POLL_INTERVAL: u64 = 30000; // 30 seconds
 
 static PARENT_ILP_KEY: &str = "parent_node_account_address";
@@ -183,7 +185,7 @@ impl RedisStoreBuilder {
                     })
                     .and_then(move |node_ilp_address| {
                         let store = RedisStore {
-                            ilp_address: Arc::new(RwLock::new(node_ilp_address)),
+                            ilp_address: RwLockAsync::new(node_ilp_address),
                             connection,
                             subscriptions: Arc::new(RwLock::new(HashMap::new())),
                             exchange_rates: Arc::new(RwLock::new(HashMap::new())),
@@ -272,7 +274,7 @@ impl RedisStoreBuilder {
 /// future versions of it will use PubSub to subscribe to updates.
 #[derive(Clone)]
 pub struct RedisStore {
-    pub ilp_address: Arc<RwLock<Address>>,
+    pub ilp_address: RwLockAsync<Address>,
     connection: RedisReconnect,
     subscriptions: Arc<RwLock<HashMap<AccountId, UnboundedSender<PaymentNotification>>>>,
     exchange_rates: Arc<RwLock<HashMap<String, f64>>>,
@@ -972,10 +974,11 @@ impl NodeStore for RedisStore {
     fn insert_account(
         &self,
         account: AccountDetails,
+        ilp_address: Address,
     ) -> Box<dyn Future<Item = Account, Error = ()> + Send> {
         let encryption_key = self.encryption_key.clone();
         let id = AccountId::new();
-        let account = match Account::try_from(id, account, self.get_ilp_address()) {
+        let account = match Account::try_from(id, account, ilp_address) {
             Ok(account) => account,
             Err(_) => return Box::new(err(())),
         };
@@ -1006,10 +1009,11 @@ impl NodeStore for RedisStore {
         &self,
         id: AccountId,
         account: AccountDetails,
+        ilp_address: Address,
     ) -> Box<dyn Future<Item = Self::Account, Error = ()> + Send> {
         let encryption_key = self.encryption_key.clone();
         let decryption_key = self.decryption_key.clone();
-        let account = match Account::try_from(id, account, self.get_ilp_address()) {
+        let account = match Account::try_from(id, account, ilp_address) {
             Ok(account) => account,
             Err(_) => return Box::new(err(())),
         };
@@ -1271,9 +1275,6 @@ impl AddressStore for RedisStore {
         let connection = self.connection.clone();
         let ilp_address_clone = ilp_address.clone();
 
-        // Set the ILP address we have in memory
-        (*self.ilp_address.write()) = ilp_address.clone();
-
         // Save it to Redis
         Box::new(
             cmd("SET")
@@ -1342,20 +1343,24 @@ impl AddressStore for RedisStore {
     fn clear_ilp_address(&self) -> Box<dyn Future<Item = (), Error = ()> + Send> {
         let self_clone = self.clone();
         Box::new(
+        self.get_ilp_address_lock().write()
+            .and_then(move|mut ilp_address_guard|{
             cmd("DEL")
                 .arg(PARENT_ILP_KEY)
-                .query_async(self.connection.clone())
+                .query_async(self_clone.connection.clone())
                 .map_err(|err| error!("Error removing parent address: {:?}", err))
                 .and_then(move |(_, _): (RedisReconnect, Value)| {
-                    *(self_clone.ilp_address.write()) = DEFAULT_ILP_ADDRESS.clone();
-                    Ok(())
-                }),
-        )
+                    *ilp_address_guard = DEFAULT_ILP_ADDRESS.clone();
+                    Ok(ilp_address_guard)
+                })
+        }).and_then(|ilp_address_guard|{
+            drop(ilp_address_guard);
+            Ok(())
+        }))
     }
 
-    fn get_ilp_address(&self) -> Address {
-        // read consumes the Arc<RwLock<T>> so we cannot return a reference
-        self.ilp_address.read().clone()
+    fn get_ilp_address_lock(&self) -> RwLockAsync<Address> {
+        self.ilp_address.clone()
     }
 }
 

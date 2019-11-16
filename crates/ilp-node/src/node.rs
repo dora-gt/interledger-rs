@@ -26,7 +26,7 @@ use interledger::{
     router::Router,
     service::{
         outgoing_service_fn, Account as AccountTrait, IncomingService, OutgoingRequest,
-        OutgoingService, Username,
+        OutgoingService, Username, AddressStore, RequestContext
     },
     service_util::{
         EchoService, ExchangeRateFetcher, ExchangeRateService, ExpiryShortenerService,
@@ -276,7 +276,7 @@ impl InterledgerNode {
                 .map_err(|_| error!(target: "interledger-node", "Error getting accounts"))
                 .and_then(move |btp_accounts| {
                     let outgoing_service =
-                        outgoing_service_fn(move |request: OutgoingRequest<Account>| {
+                        outgoing_service_fn(move |request: OutgoingRequest<Account>, context: RequestContext| {
                             // Don't log anything for failed route updates sent to child accounts
                             // because there's a good chance they'll be offline
                             if request.prepare.destination().scheme() != "peer"
@@ -401,10 +401,10 @@ impl InterledgerNode {
                                 secret_seed,
                                 admin_auth_token,
                                 store.clone(),
-                                incoming_service.clone().wrap(|request, mut next| {
+                                incoming_service.clone().wrap(|request, context, mut next| {
                                     let api = debug_span!(target: "interledger-node", "api");
                                     let _api_scope = api.enter();
-                                    next.handle_request(request).in_current_span()
+                                    next.handle_request(request, context).in_current_span()
                                 }).in_current_span(),
                                 outgoing_service.clone(),
                                 btp.clone(),
@@ -415,10 +415,10 @@ impl InterledgerNode {
                             api.node_version(env!("CARGO_PKG_VERSION").to_string());
                             // add an API of ILP over HTTP and add rejection handler
                             let api = api.into_warp_filter()
-                                .or(IlpOverHttpServer::new(incoming_service.clone().wrap(|request, mut next| {
+                                .or(IlpOverHttpServer::new(incoming_service.clone().wrap(|request, context, mut next| {
                                     let http = debug_span!(target: "interledger-node", "http");
                                     let _http_scope = http.enter();
-                                    next.handle_request(request).in_current_span()
+                                    next.handle_request(request, context).in_current_span()
                                 }).in_current_span(), store.clone()).as_filter())
                                 .recover(default_rejection_handler);
 
@@ -531,13 +531,16 @@ impl InterledgerNode {
             .and_then(move |redis_url| RedisStoreBuilder::new(redis_url, redis_secret).connect())
             .map_err(|err| error!(target: "interledger-node", "Error connecting to Redis: {:?}", err))
             .and_then(move |store| {
-                store
-                    .insert_account(account)
-                    .map_err(|_| error!(target: "interledger-node", "Unable to create account"))
-                    .and_then(|account| {
-                        debug!(target: "interledger-node", "Created account: {}", account.id());
-                        Ok(account.id())
-                    })
+                let store_clone = store.clone();
+                store.get_ilp_address_lock().read().and_then(move|ilp_address_guard|{
+                    store
+                        .insert_account(account, ilp_address_guard.clone())
+                        .map_err(|_| error!(target: "interledger-node", "Unable to create account"))
+                        .and_then(|account| {
+                            debug!(target: "interledger-node", "Created account: {}", account.id());
+                            Ok(account.id())
+                        })
+                })
             })
     }
 }

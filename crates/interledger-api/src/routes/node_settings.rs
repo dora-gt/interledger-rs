@@ -7,7 +7,7 @@ use futures::{
 use interledger_http::{deserialize_json, error::*, HttpAccount, HttpStore};
 use interledger_packet::Address;
 use interledger_router::RouterStore;
-use interledger_service::{Account, Username};
+use interledger_service::{Account, Username, AddressStore};
 use interledger_service_util::{BalanceStore, ExchangeRateStore};
 use interledger_settlement::core::types::SettlementAccount;
 use log::{error, trace};
@@ -19,6 +19,7 @@ use std::{
 };
 use url::Url;
 use warp::{self, Filter, Rejection};
+use futures_locks::RwLockReadGuard;
 
 // TODO add more to this response
 #[derive(Clone, Serialize)]
@@ -39,7 +40,8 @@ where
         + HttpStore<Account = A>
         + BalanceStore<Account = A>
         + ExchangeRateStore
-        + RouterStore,
+        + RouterStore
+        + AddressStore,
     A: Account + HttpAccount + SettlementAccount + Serialize + 'static,
 {
     // Helper filters
@@ -57,15 +59,24 @@ where
         .untuple_one()
         .boxed();
     let with_store = warp::any().map(move || store.clone()).boxed();
+    let with_ilp_address_lock =  with_store.clone()
+        .and_then(move |store:S| {
+            store.get_ilp_address_lock().read()
+                .map_err(|_| -> Rejection {
+                    ApiError::internal_server_error().into()
+                })
+        })
+        .boxed();
 
     // GET /
     let get_root = warp::get2()
         .and(warp::path::end())
         .and(with_store.clone())
-        .map(move |store: S| {
+        .and(with_ilp_address_lock.clone())
+        .map(move |store: S, ilp_address_guard: RwLockReadGuard<Address>| {
             warp::reply::json(&StatusResponse {
                 status: "Ready".to_string(),
-                ilp_address: store.get_ilp_address(),
+                ilp_address: ilp_address_guard.clone(),
                 version: node_version.clone(),
             })
         })

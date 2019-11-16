@@ -110,7 +110,7 @@ where
         let to_id = to.id();
         let incoming_amount = request.original_amount;
         let outgoing_amount = request.prepare.amount();
-        let ilp_address = self.store.get_ilp_address();
+        let ilp_address = context.ilp_address.clone();
         let settlement_client = self.settlement_client.clone();
         let to_has_engine = to.settlement_engine_details().is_some();
 

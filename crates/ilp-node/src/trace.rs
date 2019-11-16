@@ -2,7 +2,7 @@ use futures::Future;
 use interledger::{
     ccp::{CcpRoutingAccount, RoutingRelation},
     packet::{ErrorCode, Fulfill, Reject},
-    service::{Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService},
+    service::{Account, IncomingRequest, IncomingService, OutgoingRequest, OutgoingService, RequestContext},
 };
 use std::str;
 use tracing::{debug_span, error_span, info, info_span};
@@ -14,6 +14,7 @@ use uuid::Uuid;
 /// level and more information for the DEBUG level.
 pub fn trace_incoming<A: Account>(
     request: IncomingRequest<A>,
+    context: RequestContext,
     mut next: impl IncomingService<A>,
 ) -> impl Future<Item = Fulfill, Error = Reject> {
     let request_span = error_span!(target: "interledger-node",
@@ -37,7 +38,7 @@ pub fn trace_incoming<A: Account>(
     );
     let _details_scope = details_span.enter();
 
-    next.handle_request(request)
+    next.handle_request(request, context)
         .then(trace_response)
         .in_current_span()
 }
@@ -48,6 +49,7 @@ pub fn trace_incoming<A: Account>(
 /// level and more information for the DEBUG level.
 pub fn trace_forwarding<A: Account>(
     request: OutgoingRequest<A>,
+    context: RequestContext,
     mut next: impl OutgoingService<A>,
 ) -> impl Future<Item = Fulfill, Error = Reject> {
     // Here we only include the outgoing details because this will be
@@ -66,7 +68,7 @@ pub fn trace_forwarding<A: Account>(
     );
     let _details_scope = details_span.enter();
 
-    next.send_request(request).in_current_span()
+    next.send_request(request, context).in_current_span()
 }
 
 /// Add tracing context for the outgoing request (created by this node).
@@ -74,6 +76,7 @@ pub fn trace_forwarding<A: Account>(
 /// level and more information for the DEBUG level.
 pub fn trace_outgoing<A: Account + CcpRoutingAccount>(
     request: OutgoingRequest<A>,
+    context: RequestContext,
     mut next: impl OutgoingService<A>,
 ) -> impl Future<Item = Fulfill, Error = Reject> {
     let request_span = error_span!(target: "interledger-node",
@@ -100,7 +103,7 @@ pub fn trace_outgoing<A: Account + CcpRoutingAccount>(
     // because there's a good chance they'll be offline
     let ignore_rejects = request.prepare.destination().scheme() == "peer"
         && request.to.routing_relation() == RoutingRelation::Child;
-    next.send_request(request)
+    next.send_request(request, context)
         .then(move |result| {
             if let Err(ref err) = result {
                 if err.code() == ErrorCode::F02_UNREACHABLE && ignore_rejects {

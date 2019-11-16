@@ -15,12 +15,14 @@ use interledger_service_util::{BalanceStore, ExchangeRateStore};
 use interledger_settlement::core::types::SettlementAccount;
 use interledger_spsp::{pay, SpspResponder};
 use interledger_stream::{PaymentNotification, StreamNotificationsStore};
+use interledger_packet::Address;
 use log::{debug, error, trace};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::convert::TryFrom;
 use std::str::FromStr;
 use warp::{self, Filter, Rejection};
+use futures_locks::{RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Deserialize, Debug)]
 struct SpspPayRequest {
@@ -105,6 +107,23 @@ where
                     // TODO differentiate between server error and not found
                     error!("Error getting account id from username: {}", username);
                     ApiError::account_not_found().into()
+                })
+        })
+        .boxed();
+    let with_ilp_address_lock =  with_store.clone()
+        .and_then(move |store:S| {
+            store.get_ilp_address_lock().read()
+                .map_err(|_| -> Rejection {
+                    ApiError::internal_server_error().into()
+                })
+        })
+        .boxed();
+
+    let with_ilp_address_write_lock =  with_store.clone()
+        .and_then(move |store:S| {
+            store.get_ilp_address_lock().write()
+                .map_err(|_| -> Rejection {
+                    ApiError::internal_server_error().into()
                 })
         })
         .boxed();
@@ -198,21 +217,28 @@ where
         .and(admin_only.clone())
         .and(deserialize_json())
         .and(with_store.clone())
-        .and_then(move |account_details: AccountDetails, store: S| {
+        .and(with_ilp_address_write_lock.clone())
+        .and_then(move |account_details: AccountDetails, store: S, ilp_address_guard: RwLockWriteGuard<Address>| {
             let store_clone = store.clone();
             let handler = outgoing_handler_clone.clone();
             let btp = btp_clone.clone();
+            let ilp_address = ilp_address_guard.clone();
+            let ilp_address_for_account = ilp_address_guard.clone();
+            let context = RequestContext::new(ilp_address);
             store
-                .insert_account(account_details.clone())
+                .insert_account(account_details.clone(), ilp_address_for_account)
                 .map_err(move |_| {
                     error!("Error inserting account into store: {:?}", account_details);
                     // TODO need more information
                     ApiError::internal_server_error().into()
                 })
                 .and_then(move |account| {
-                    connect_to_external_services(handler, account, store_clone, btp)
+                    connect_to_external_services(handler, account, store_clone, btp, context, ilp_address_guard)
                 })
-                .and_then(|account: A| Ok(warp::reply::json(&account)))
+                .and_then(|(account, ilp_address_guard):(A, RwLockWriteGuard<Address>)| {
+                    drop(ilp_address_guard);
+                    Ok(warp::reply::json(&account))
+                })
         })
         .boxed();
 
@@ -236,18 +262,25 @@ where
         .and(admin_only.clone())
         .and(deserialize_json())
         .and(with_store.clone())
+        .and(with_ilp_address_write_lock.clone())
         .and_then(
-            move |id: A::AccountId, account_details: AccountDetails, store: S| {
+            move |id: A::AccountId, account_details: AccountDetails, store: S, ilp_address_guard: RwLockWriteGuard<Address>| {
                 let store_clone = store.clone();
                 let handler = outgoing_handler.clone();
                 let btp = btp.clone();
+                let ilp_address = ilp_address_guard.clone();
+                let ilp_address_for_account = ilp_address_guard.clone();
+                let context = RequestContext::new(ilp_address);
                 store
-                    .update_account(id, account_details)
+                    .update_account(id, account_details, ilp_address_for_account)
                     .map_err::<_, Rejection>(move |_| ApiError::internal_server_error().into())
                     .and_then(move |account| {
-                        connect_to_external_services(handler, account, store_clone, btp)
+                        connect_to_external_services(handler, account, store_clone, btp, context, ilp_address_guard)
                     })
-                    .and_then(|account: A| Ok(warp::reply::json(&account)))
+                    .and_then(|(account, ilp_address_guard):(A, RwLockWriteGuard<Address>)| {
+                        drop(ilp_address_guard);
+                        Ok(warp::reply::json(&account))
+                    })
             },
         )
         .boxed();
@@ -362,34 +395,32 @@ where
         .and(authorized_user_only.clone())
         .and(deserialize_json())
         .and(with_incoming_handler.clone())
-        .and(with_store.clone())
+        .and(with_ilp_address_lock.clone())
         .and_then(
-            move |account: A, pay_request: SpspPayRequest, incoming_handler: I, store| {
-                store.get_ilp_address_lock().read().and_then(|ilp_address_guard|{
-                    let ilp_address = ilp_address_guard.clone();
-                    let context = RequestContext::new(ilp_address);
-                    pay(
-                        incoming_handler,
-                        account.clone(),
-                        &pay_request.receiver,
-                        pay_request.source_amount,
-                        context,
-                    )
-                        .and_then(move |receipt| {
-                            debug!("Sent SPSP payment, receipt: {:?}", receipt);
-                            Ok(warp::reply::json(&json!(receipt)))
-                        })
-                        .map_err::<_, Rejection>(|err| {
-                            error!("Error sending SPSP payment: {:?}", err);
-                            // TODO give a different error message depending on what type of error it is
-                            ApiError::internal_server_error().into()
-                        })
-                        .then(|result|{
-                            // When the payment is done, the ILP address is released.
-                            drop(ilp_address_guard);
-                            result
-                        })
-                })
+            move |account: A, pay_request: SpspPayRequest, incoming_handler: I, ilp_address_guard: RwLockReadGuard<Address>| {
+                let ilp_address = ilp_address_guard.clone();
+                let context = RequestContext::new(ilp_address);
+                pay(
+                    incoming_handler,
+                    account.clone(),
+                    &pay_request.receiver,
+                    pay_request.source_amount,
+                    context,
+                )
+                    .and_then(move |receipt| {
+                        debug!("Sent SPSP payment, receipt: {:?}", receipt);
+                        Ok(warp::reply::json(&json!(receipt)))
+                    })
+                    .map_err::<_, Rejection>(|err| {
+                        error!("Error sending SPSP payment: {:?}", err);
+                        // TODO give a different error message depending on what type of error it is
+                        ApiError::internal_server_error().into()
+                    })
+                    .then(|result|{
+                        // When the payment is done, the ILP address is released.
+                        drop(ilp_address_guard);
+                        result
+                    })
             },
         )
         .boxed();
@@ -477,7 +508,9 @@ fn get_address_from_parent_and_update_routes<O, A, S>(
     mut service: O,
     parent: A,
     store: S,
-) -> impl Future<Item = (), Error = ()>
+    context: RequestContext,
+    mut ilp_address_guard: RwLockWriteGuard<Address>
+) -> impl Future<Item = RwLockWriteGuard<Address>, Error = ()>
 where
     O: OutgoingService<A> + Clone + Send + Sync + 'static,
     A: CcpRoutingAccount + Clone + Send + Sync + 'static,
@@ -495,7 +528,7 @@ where
             to: parent.clone(),
             prepare,
             original_amount: 0,
-        })
+        }, context.clone())
         .map_err(|err| error!("Error getting ILDCP info: {:?}", err))
         .and_then(|fulfill| {
             let response = IldcpResponse::try_from(fulfill.into_data().freeze()).map_err(|err| {
@@ -522,6 +555,8 @@ where
             }
             .to_prepare();
             debug!("Asking for routes from {:?}", parent.clone());
+            let ilp_address_clone = ilp_address.clone();
+
             join_all(vec![
                 // Set the parent to be the default route for everything
                 // that starts with their global prefix
@@ -536,15 +571,18 @@ where
                             to: parent.clone(),
                             original_amount: prepare.amount(),
                             prepare: prepare.clone(),
-                        })
+                        }, context)
                         .and_then(move |_| Ok(()))
                         .map_err(move |err| {
                             error!("Got error when trying to update routes {:?}", err)
                         }),
                 ),
-            ])
+            ]).and_then(move|_|{
+                *ilp_address_guard = ilp_address_clone;
+                Ok(ilp_address_guard)
+            })
         })
-        .and_then(move |_| Ok(()))
+        .and_then(move |ilp_address_guard| Ok((ilp_address_guard)))
 }
 
 // Helper function which gets called whenever a new account is added or
@@ -562,7 +600,9 @@ fn connect_to_external_services<O, A, S, B>(
     account: A,
     store: S,
     btp: BtpOutgoingService<B, A>,
-) -> impl Future<Item = A, Error = warp::reject::Rejection>
+    context: RequestContext,
+    ilp_address_guard: RwLockWriteGuard<Address>,
+) -> impl Future<Item = (A, RwLockWriteGuard<Address>), Error = warp::reject::Rejection>
 where
     O: OutgoingService<A> + Clone + Send + Sync + 'static,
     A: CcpRoutingAccount + BtpAccount + SettlementAccount + Clone + Send + Sync + 'static,
@@ -586,11 +626,11 @@ where
         // them and update all of our routes
         let get_ilp_address_fut = if account.routing_relation() == RoutingRelation::Parent {
             Either::A(
-                get_address_from_parent_and_update_routes(service, account.clone(), store.clone())
+                get_address_from_parent_and_update_routes(service, account.clone(), store.clone(), context, ilp_address_guard)
                 .map_err(|_| ApiError::internal_server_error().into())
             )
         } else {
-            Either::B(ok(()))
+            Either::B(ok(ilp_address_guard))
         };
 
         let default_settlement_engine_fut = store.get_asset_settlement_engine(account.asset_code())
@@ -600,7 +640,7 @@ where
         // if a settlement_engine_url was configured on the account
         // or if there is a settlement engine configured for that
         // account's asset_code
-        default_settlement_engine_fut.join(get_ilp_address_fut).and_then(move |(default_settlement_engine, _)| {
+        default_settlement_engine_fut.join(get_ilp_address_fut).and_then(move |(default_settlement_engine, ilp_address_guard)| {
             let settlement_engine_url = account.settlement_engine_details().map(|details| details.url).or(default_settlement_engine);
             if let Some(se_url) = settlement_engine_url {
                 let id = account.id();
@@ -622,10 +662,10 @@ where
                         Ok(())
                     })
                     .and_then(move |_| {
-                        Ok(account)
+                        Ok((account, ilp_address_guard))
                     }))
             } else {
-                Either::B(ok(account))
+                Either::B(ok((account, ilp_address_guard)))
             }
         })
     })

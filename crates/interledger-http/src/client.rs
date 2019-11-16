@@ -59,8 +59,7 @@ where
 
     /// Send an OutgoingRequest to a peer that implements the ILP-Over-HTTP.
     fn send_request(&mut self, request: OutgoingRequest<A>, context: RequestContext) -> Self::Future {
-        let ilp_address = self.store.get_ilp_address();
-        let ilp_address_clone = ilp_address.clone();
+        let ilp_address = context.ilp_address.clone();
         if let Some(url) = request.to.get_http_url() {
             trace!(
                 "Sending outgoing ILP over HTTP packet to account: {} (URL: {})",
@@ -103,12 +102,12 @@ where
                         RejectBuilder {
                             code,
                             message: message.as_str().as_bytes(),
-                            triggered_by: Some(&ilp_address),
+                            triggered_by: Some(&context.ilp_address),
                             data: &[],
                         }
                         .build()
                     })
-                    .and_then(move |resp| parse_packet_from_response(resp, ilp_address_clone)),
+                    .and_then(move |resp| parse_packet_from_response(resp, ilp_address)),
             )
         } else {
             Box::new(self.next.send_request(request, context))

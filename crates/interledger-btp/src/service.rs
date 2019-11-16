@@ -234,7 +234,6 @@ where
         // the incoming Prepare packets they get in self.pending_incoming
         // Now that we're adding an incoming handler, this will spawn a task to read
         // all Prepare packets from the buffer, handle them, and send the responses back
-        let mut incoming_handler_clone = incoming_handler.clone();
         let connections_clone = self.connections.clone();
         let handle_pending_incoming = self
             .pending_incoming
@@ -242,8 +241,6 @@ where
             .take()
             .expect("handle_incoming can only be called once")
             .for_each(move |(account, request_id, prepare)| {
-                let ilp_address = ilp_address_guard.clone();
-                let context = RequestContext::new(ilp_address);
                 let account_id = account.id();
                 let connections_clone = connections_clone.clone();
                 let request = IncomingRequest {
@@ -256,32 +253,37 @@ where
                     request.from.username(),
                     request.from.id()
                 );
-                incoming_handler_clone
-                    .handle_request(request, context)
-                    .then(move |result| {
-                        drop(ilp_address_guard);
-                        let packet = match result {
-                            Ok(fulfill) => Packet::Fulfill(fulfill),
-                            Err(reject) => Packet::Reject(reject),
-                        };
-                        if let Some(connection) = connections_clone
-                            .read()
-                            .get(&account_id) {
-                            let message = ilp_packet_to_ws_message(request_id, packet);
-                            connection
-                                .clone()
-                                .unbounded_send(message)
-                                .map_err(move |err| {
-                                    error!(
-                                        "Error sending response to account: {} {:?}",
-                                        account_id, err
-                                    )
-                                })
-                        } else {
-                            error!("Error sending response to account: {}, connection was closed. {:?}", account_id, packet);
-                            Err(())
-                        }
-                    })
+                let mut incoming_handler_clone = incoming_handler.clone();
+                store.get_ilp_address_lock().read().and_then( move|ilp_address_guard|{
+                    let ilp_address = ilp_address_guard.clone();
+                    let context = RequestContext::new(ilp_address);
+                    incoming_handler_clone
+                        .handle_request(request, context)
+                        .then(move |result| {
+                            drop(ilp_address_guard);
+                            let packet = match result {
+                                Ok(fulfill) => Packet::Fulfill(fulfill),
+                                Err(reject) => Packet::Reject(reject),
+                            };
+                            if let Some(connection) = connections_clone
+                                .read()
+                                .get(&account_id) {
+                                let message = ilp_packet_to_ws_message(request_id, packet);
+                                connection
+                                    .clone()
+                                    .unbounded_send(message)
+                                    .map_err(move |err| {
+                                        error!(
+                                            "Error sending response to account: {} {:?}",
+                                            account_id, err
+                                        )
+                                    })
+                            } else {
+                                error!("Error sending response to account: {}, connection was closed. {:?}", account_id, packet);
+                                Err(())
+                            }
+                        })
+                })
             })
             .then(move |_| {
                 trace!("Finished reading from pending_incoming buffer");

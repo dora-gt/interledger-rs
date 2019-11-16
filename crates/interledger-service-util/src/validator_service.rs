@@ -76,7 +76,7 @@ where
             let result = Box::new(err(RejectBuilder {
                 code: ErrorCode::R00_TRANSFER_TIMED_OUT,
                 message: &[],
-                triggered_by: Some(&self.store.get_ilp_address()),
+                triggered_by: Some(&context.ilp_address),
                 data: &[],
             }
             .build()));
@@ -108,7 +108,7 @@ where
         let expires_at = DateTime::<Utc>::from(request.prepare.expires_at());
         let now = Utc::now();
         let time_left = expires_at - now;
-        let ilp_address = self.store.get_ilp_address();
+        let ilp_address = context.ilp_address.clone();
         let ilp_address_clone = ilp_address.clone();
         if time_left > Duration::zero() {
             Box::new(

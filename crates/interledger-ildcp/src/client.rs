@@ -5,7 +5,7 @@ use log::{debug, error};
 use std::convert::TryFrom;
 
 /// Get the ILP address and asset details for a given account.
-pub fn get_ildcp_info<I, A, S>(
+pub fn get_ildcp_info<I, A>(
     service: &mut I,
     account: A,
     context: RequestContext,

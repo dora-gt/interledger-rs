@@ -38,7 +38,7 @@ where
     /// On receive request:
     /// 1. if request.prepare.amount <= request.from.max_packet_amount forward the request, else error
     fn handle_request(&mut self, request: IncomingRequest<A>, context: RequestContext) -> Self::Future {
-        let ilp_address = self.store.get_ilp_address();
+        let ilp_address = context.ilp_address.clone();
         let max_packet_amount = request.from.max_packet_amount();
         if request.prepare.amount() <= max_packet_amount {
             Box::new(self.next.handle_request(request, context))

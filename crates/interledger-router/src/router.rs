@@ -54,7 +54,6 @@ where
         let destination = request.prepare.destination();
         let mut next_hop = None;
         let routing_table = self.store.routing_table();
-        let ilp_address = self.store.get_ilp_address();
 
         // Check if we have a direct path for that account or if we need to scan
         // through the routing table
@@ -92,6 +91,7 @@ where
 
         if let Some(account_id) = next_hop {
             let mut next = self.next.clone();
+            let ilp_address = context.ilp_address.clone();
             Box::new(
                 self.store
                     .get_accounts(vec![account_id])
@@ -116,12 +116,12 @@ where
                 {
                     // Log a warning if the global prefix does not match
                     let destination = request.prepare.destination();
-                    if destination.scheme() != ilp_address.scheme()
+                    if destination.scheme() != context.ilp_address.scheme()
                         && destination.scheme() != "peer"
                     {
                         format!(
                         " (warning: address does not start with the right scheme prefix, expected: \"{}\")",
-                        ilp_address.scheme()
+                        &context.ilp_address.scheme()
                     )
                     } else {
                         "".to_string()
@@ -132,7 +132,7 @@ where
             Box::new(err(RejectBuilder {
                 code: ErrorCode::F02_UNREACHABLE,
                 message: &[],
-                triggered_by: Some(&ilp_address),
+                triggered_by: Some(&context.ilp_address),
                 data: &[],
             }
             .build()))

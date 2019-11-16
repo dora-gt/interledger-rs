@@ -87,7 +87,7 @@ where
         mut request: OutgoingRequest<A>,
         context: RequestContext,
     ) -> Box<dyn Future<Item = Fulfill, Error = Reject> + Send> {
-        let ilp_address = self.store.get_ilp_address();
+        let ilp_address = context.ilp_address.clone();
         if request.prepare.amount() > 0 {
             let rate: f64 = if request.from.asset_code() == request.to.asset_code() {
                 1f64
