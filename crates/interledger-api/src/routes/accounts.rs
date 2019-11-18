@@ -593,36 +593,35 @@ where
             debug!("Asking for routes from {:?}", parent.clone());
             let ilp_address_clone = ilp_address.clone();
 
-            join_all(vec![
-                // Set the parent to be the default route for everything
-                // that starts with their global prefix
-                store.set_default_route(parent.id()),
-                // Update our store's address
-                store.set_ilp_address(ilp_address),
-                // Get the parent's routes for us
-                Box::new(
-                    service
-                        .send_request(
-                            OutgoingRequest {
-                                from: parent.clone(),
-                                to: parent.clone(),
-                                original_amount: prepare.amount(),
-                                prepare: prepare.clone(),
-                            },
-                            context,
-                        )
-                        .and_then(move |_| Ok(()))
-                        .map_err(move |err| {
-                            error!("Got error when trying to update routes {:?}", err)
-                        }),
-                ),
-            ])
-            .and_then(move |_| {
-                *ilp_address_guard = ilp_address_clone;
+            // Set the parent to be the default route for everything
+            // that starts with their global prefix
+            let default_route_future = store.set_default_route(parent.id());
+
+            // Update our store's address
+            let set_ilp_address_future = store.set_ilp_address(ilp_address, ilp_address_guard);
+
+            // Get the parent's routes for us
+            let update_routes_future = Box::new(
+                service
+                    .send_request(
+                        OutgoingRequest {
+                            from: parent.clone(),
+                            to: parent.clone(),
+                            original_amount: prepare.amount(),
+                            prepare: prepare.clone(),
+                        },
+                        context,
+                    )
+                    .and_then(move |_| Ok(()))
+                    .map_err(move |err| {
+                        error!("Got error when trying to update routes {:?}", err)
+                    }),
+            );
+            default_route_future.join3(set_ilp_address_future, update_routes_future)
+            .and_then(move |(_, ilp_address_guard, _)| {
                 Ok(ilp_address_guard)
             })
         })
-        .and_then(move |ilp_address_guard| Ok(ilp_address_guard))
 }
 
 // Helper function which gets called whenever a new account is added or

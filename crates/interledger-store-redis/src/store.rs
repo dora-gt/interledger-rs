@@ -63,6 +63,7 @@ use tokio_executor::spawn;
 use tokio_timer::Interval;
 use url::Url;
 use zeroize::Zeroize;
+use futures_locks::RwLockWriteGuard;
 
 type RwLockAsync<T> = futures_locks::RwLock<T>;
 
@@ -1269,7 +1270,8 @@ impl AddressStore for RedisStore {
     fn set_ilp_address(
         &self,
         ilp_address: Address,
-    ) -> Box<dyn Future<Item = (), Error = ()> + Send> {
+        mut ilp_address_guard: RwLockWriteGuard<Address>,
+    ) -> Box<dyn Future<Item = RwLockWriteGuard<Address>, Error = ()> + Send> {
         debug!("Setting ILP address to: {}", ilp_address);
         let routing_table = self.routes.clone();
         let connection = self.connection.clone();
@@ -1336,7 +1338,10 @@ impl AddressStore for RedisStore {
                             update_routes(connection, routing_table)
                         })
                 }))
-                .and_then(move |_| Ok(())),
+                .and_then(move|_|{
+                    *ilp_address_guard = ilp_address;
+                    Ok(ilp_address_guard)
+                })
         )
     }
 

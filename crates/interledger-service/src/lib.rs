@@ -27,7 +27,7 @@
 //! HttpServerService --> ValidatorService --> StreamReceiverService
 
 use futures::{Future, IntoFuture};
-use futures_locks::{RwLock, RwLockReadGuard};
+use futures_locks::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use interledger_packet::{Address, Fulfill, Prepare, Reject};
 use std::{
     cmp::Eq,
@@ -348,7 +348,8 @@ pub trait AddressStore: Clone {
     fn set_ilp_address(
         &self,
         ilp_address: Address,
-    ) -> Box<dyn Future<Item = (), Error = ()> + Send>;
+        ilp_address_guard: RwLockWriteGuard<Address>,
+    ) -> Box<dyn Future<Item = RwLockWriteGuard<Address>, Error = ()> + Send>;
 
     fn clear_ilp_address(&self) -> Box<dyn Future<Item = (), Error = ()> + Send>;
 
